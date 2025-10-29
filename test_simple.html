@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; padding: 20px; background: #f5f5f5; }
+        canvas { border: 2px solid red; background: white; display: block; }
+    </style>
+</head>
+<body>
+    <h2>Grid Test - Should see red border and gray lines</h2>
+    <canvas id="testCanvas" width="1200" height="800"></canvas>
+    <script>
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        console.log('Canvas:', canvas.width, 'x', canvas.height);
+        
+        // Fill background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw grid - 150px spacing
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 2;
+        
+        for (let x = 0; x <= canvas.width; x += 150) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
+        
+        for (let y = 0; y <= canvas.height; y += 150) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
+        
+        console.log('Grid drawn');
+    </script>
+</body>
+</html>

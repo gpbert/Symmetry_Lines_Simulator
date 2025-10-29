@@ -1,434 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Symmetry Line Simulator - 300mm Grid Strategy</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            display: flex;
-            height: 100vh;
-            overflow: hidden;
-        }
-
-        .sidebar {
-            width: 320px;
-            background: white;
-            border-right: 1px solid #e0e0e0;
-            display: flex;
-            flex-direction: column;
-            overflow-y: auto;
-        }
-
-        .sidebar-header {
-            padding: 20px;
-            border-bottom: 1px solid #e0e0e0;
-            background: #2196F3;
-            color: white;
-        }
-
-        .sidebar-header h1 {
-            font-size: 20px;
-            margin-bottom: 5px;
-        }
-
-        .sidebar-header p {
-            font-size: 12px;
-            opacity: 0.9;
-        }
-
-        .tools-section {
-            padding: 20px;
-            border-bottom: 1px solid #e0e0e0;
-        }
-
-        .section-title {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 15px;
-            color: #333;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .tool-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .btn {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn-primary {
-            background: #2196F3;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #1976D2;
-        }
-
-        .btn-primary.active {
-            background: #1565C0;
-            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
-        }
-
-        .btn-secondary {
-            background: #f5f5f5;
-            color: #333;
-        }
-
-        .btn-secondary:hover {
-            background: #e0e0e0;
-        }
-
-        .btn-danger {
-            background: #f44336;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #d32f2f;
-        }
-
-        .property-group {
-            margin-bottom: 20px;
-        }
-
-        .property-group label {
-            display: block;
-            font-size: 13px;
-            font-weight: 500;
-            margin-bottom: 6px;
-            color: #555;
-        }
-
-        .property-group select,
-        .property-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-
-        .property-group input[type="checkbox"] {
-            width: auto;
-            margin-right: 8px;
-        }
-
-        .checkbox-label {
-            display: flex;
-            align-items: center;
-            font-size: 13px;
-            color: #555;
-        }
-
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .toolbar {
-            background: white;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 15px 20px;
-            display: flex;
-            gap: 15px;
-            align-items: center;
-        }
-
-        .canvas-container {
-            flex: 1;
-            position: relative;
-            overflow: hidden;
-        }
-
-        canvas {
-            cursor: crosshair;
-            display: block;
-        }
-
-        .info-panel {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            font-size: 13px;
-            min-width: 200px;
-        }
-
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-
-        .info-label {
-            color: #666;
-            margin-right: 15px;
-        }
-
-        .info-value {
-            font-weight: 600;
-            color: #333;
-        }
-
-        .violations-panel {
-            padding: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .violation-item {
-            background: #fff3e0;
-            border-left: 4px solid #ff9800;
-            padding: 12px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            font-size: 13px;
-        }
-
-        .violation-item.error {
-            background: #ffebee;
-            border-left-color: #f44336;
-        }
-
-        .violation-title {
-            font-weight: 600;
-            margin-bottom: 4px;
-            color: #d84315;
-        }
-
-        .violation-item.error .violation-title {
-            color: #c62828;
-        }
-
-        .no-violations {
-            text-align: center;
-            padding: 20px;
-            color: #4caf50;
-            font-weight: 500;
-        }
-
-        .stats {
-            display: flex;
-            gap: 20px;
-            font-size: 13px;
-        }
-
-        .stat-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .stat-label {
-            color: #666;
-        }
-
-        .stat-value {
-            font-weight: 600;
-            color: #2196F3;
-        }
-
-        .help-text {
-            font-size: 12px;
-            color: #999;
-            margin-top: 5px;
-            font-style: italic;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <h1>Symmetry Line Simulator</h1>
-        </div>
-
-        <div class="tools-section">
-            <div class="section-title">Tools</div>
-            <div class="tool-buttons">
-                <button id="drawWallBtn" class="btn btn-primary">
-                    ✏️ Draw Wall
-                </button>
-                <button id="selectBtn" class="btn btn-secondary">
-                    👆 Select / Move
-                </button>
-                <button id="deleteBtn" class="btn btn-danger">
-                    🗑️ Delete Selected
-                </button>
-            </div>
-        </div>
-
-        <div class="tools-section">
-            <div class="section-title">Floor Management</div>
-            <div class="property-group">
-                <label for="currentFloor">Current Floor</label>
-                <select id="currentFloor">
-                    <option value="0">Ground Floor</option>
-                </select>
-            </div>
-            <div class="tool-buttons">
-                <button id="addFloorBtn" class="btn btn-secondary">
-                    ➕ Add Floor Above
-                </button>
-                <button id="removeFloorBtn" class="btn btn-secondary">
-                    ➖ Remove Current Floor
-                </button>
-            </div>
-            <div class="property-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showOtherFloors" checked>
-                    Show Adjacent Floors
-                </label>
-            </div>
-        </div>
-
-        <div class="tools-section">
-            <div class="section-title">Wall Properties</div>
-            <div class="property-group">
-                <label for="wallThickness">Thickness (mm)</label>
-                <select id="wallThickness">
-                    <option value="200">200 mm</option>
-                    <option value="300">300 mm</option>
-                </select>
-            </div>
-            <div class="property-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showGrid" checked>
-                    Show Grid
-                </label>
-            </div>
-            <div class="property-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showRestrictedZones" checked>
-                    Show Restricted Zones
-                </label>
-            </div>
-        </div>
-
-        <div class="tools-section">
-            <div class="section-title">Actions</div>
-            <div class="tool-buttons">
-                <button id="clearAllBtn" class="btn btn-secondary">
-                    🔄 Clear All
-                </button>
-            </div>
-        </div>
-
-        <div class="violations-panel">
-            <div class="section-title">Validation Results</div>
-            <div id="violationsList">
-                <div class="no-violations">No walls drawn yet</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="main-content">
-        <div class="toolbar">
-            <div class="stats">
-                <div class="stat-item">
-                    <span class="stat-label">Walls:</span>
-                    <span class="stat-value" id="wallCount">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Selected:</span>
-                    <span class="stat-value" id="selectedInfo">None</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="canvas-container">
-            <canvas id="mainCanvas"></canvas>
-        </div>
-    </div>
-
-    <script>
-        // Constants
-        const GRID_SIZE_EXTERNAL = 300; // mm - 300mm grid external
-        const GRID_SIZE_INTERNAL = 100; // mm - 100mm internal
-        const MM_TO_PX = 0.15; // Scale factor for visualization (1mm = 0.15px)
-        const COLUMN_SIZE = 100; // mm - 10x10cm steel column
-        const MIN_WALL_LENGTH = 400; // mm
-        const MAX_WALL_LENGTH = 6000; // mm
-        const MIN_DISTANCE_PARALLEL = 600; // mm
-        const MIN_DISTANCE_OPPOSITE = 1200; // mm
-
-        // State
-        let walls = [];
-        let selectedWall = null;
-        let currentMode = 'draw';
-        let drawingWall = null;
-        let tempPoint = null;
-        
-        // Floor management
-        let floors = [
-            { id: 0, name: 'Ground Floor', height: 0 }
-        ];
-        let currentFloorId = 0;
-
-        // Canvas variables
-        let canvas, ctx;
-        
-        // Initialize everything when DOM is ready
-        window.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, initializing...');
-            
-            canvas = document.getElementById('mainCanvas');
-            if (!canvas) {
-                console.error('Canvas element not found!');
-                return;
-            }
-            
-            ctx = canvas.getContext('2d');
-            console.log('Canvas and context initialized');
-            
-            function resizeCanvas() {
-                const container = canvas.parentElement;
-                canvas.width = container.clientWidth;
-                canvas.height = container.clientHeight;
-                console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
-                if (canvas.width > 0 && canvas.height > 0) {
-                    draw();
-                } else {
-                    console.error('Canvas has zero dimensions!');
-                }
-            }
-            
-            window.addEventListener('resize', resizeCanvas);
-            
-            // Give the browser time to layout the DOM
-            setTimeout(() => {
-                resizeCanvas();
-                setupEventListeners();
-            }, 100);
-        });
-
         // Wall class
         class Wall {
             constructor(ax, ay, bx, by, thickness = 200, height = 2700, groupId = null, floorId = 0) {
@@ -629,20 +198,15 @@
 
         // Drawing functions
         function drawGrid() {
-            if (!ctx || !canvas) {
-                console.error('Canvas not initialized in drawGrid!');
+            const showGridCheckbox = document.getElementById('showGrid');
+            if (showGridCheckbox && !showGridCheckbox.checked) {
                 return;
             }
-            
-            const showGridCheckbox = document.getElementById('showGrid');
-            if (showGridCheckbox && !showGridCheckbox.checked) return;
-            
-            console.log('Drawing grid...');
+
             const gridStepExternal = mmToPx(GRID_SIZE_EXTERNAL);
             const gridStepInternal = mmToPx(GRID_SIZE_INTERNAL);
-            console.log('Grid steps:', gridStepExternal, gridStepInternal);
 
-            // Draw 300mm grid (external) - DARK, thicker lines
+            // Draw 300mm grid (external) - thicker, DARK lines
             ctx.strokeStyle = '#999999';
             ctx.lineWidth = 2;
             for (let x = 0; x <= canvas.width; x += gridStepExternal) {
@@ -651,6 +215,7 @@
                 ctx.lineTo(x, canvas.height);
                 ctx.stroke();
             }
+
             for (let y = 0; y <= canvas.height; y += gridStepExternal) {
                 ctx.beginPath();
                 ctx.moveTo(0, y);
@@ -669,6 +234,7 @@
                 ctx.lineTo(x, canvas.height);
                 ctx.stroke();
             }
+
             for (let y = 0; y <= canvas.height; y += gridStepInternal) {
                 // Skip if it's on a 300mm line
                 if (Math.abs(y % gridStepExternal) < 0.5) continue;
@@ -680,7 +246,11 @@
         }
 
         function getRestrictedZones(wall) {
-            // Show restricted zones from all floors on the current floor
+            // Only get zones for walls on current floor
+            if (wall.floorId !== currentFloorId) {
+                return [];
+            }
+            
             const zones = [];
             // Internal face is at points A and B (blue line)
             const internalY = wall.pointA.y;
@@ -924,17 +494,7 @@
 
         function draw() {
             console.log('draw() called');
-            
-            if (!ctx || !canvas) {
-                console.error('Canvas not initialized in draw!');
-                return;
-            }
-            
-            console.log('Drawing on canvas:', canvas.width, 'x', canvas.height);
-            
-            // White background
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             drawGrid();
 
@@ -955,8 +515,8 @@
             // Get current floor walls
             const currentFloorWalls = walls.filter(w => w.floorId === currentFloorId);
 
-            // Draw restricted zones from all floors
-            if (walls.length > 0) {
+            // Draw restricted zones for current floor only
+            if (currentFloorWalls.length > 0) {
                 drawRestrictedZones();
             }
 
@@ -987,7 +547,7 @@
                     tempPoint.x,
                     tempPoint.y,
                     parseInt(document.getElementById('wallThickness').value),
-                    2700 // Default height
+                    parseInt(document.getElementById('wallHeight').value)
                 );
                 
                 // Calculate wall segments if longer than MAX_WALL_LENGTH
@@ -1262,10 +822,9 @@
 
                             if (dist < minDist) {
                                 violations.push({
-                                    type: 'error',
-                                    message: `Too close to Wall ${otherIndex + 1} (${Math.round(dist)}mm). Minimum: ${minDist}mm`
-                                });
-                            }
+                                type: 'error',
+                                message: `Too close to Wall ${otherIndex + 1} (${Math.round(dist)}mm). Minimum: ${minDist}mm`
+                            });
                         }
                     }
                 }
@@ -1351,10 +910,11 @@
             ctx.stroke();
         }
 
-        function setupEventListeners() {
         canvas.addEventListener('mousemove', (e) => {
             const pos = getMousePosition(e);
             currentMousePos = pos;
+            document.getElementById('mouseInfo').textContent = 
+                `${Math.round(pos.x)}, ${Math.round(pos.y)} mm`;
 
             if (currentMode === 'draw' && drawingWall) {
                 // Constrain to horizontal or vertical only
@@ -1521,6 +1081,10 @@
             }
         });
 
+        document.getElementById('validateBtn').addEventListener('click', () => {
+            validateAllWalls();
+        });
+
         document.getElementById('showGrid').addEventListener('change', draw);
         document.getElementById('showRestrictedZones').addEventListener('change', draw);
 
@@ -1532,70 +1096,7 @@
                 validateAllWalls();
             }
         });
-        
-        // Floor management event listeners
-        document.getElementById('addFloorBtn').addEventListener('click', () => {
-            const newFloorId = floors.length;
-            const newFloor = {
-                id: newFloorId,
-                name: `Floor ${newFloorId}`,
-                height: newFloorId * 2700
-            };
-            floors.push(newFloor);
-            updateFloorDropdown();
-            currentFloorId = newFloorId;
-            document.getElementById('currentFloor').value = currentFloorId;
-            draw();
-        });
-        
-        document.getElementById('removeFloorBtn').addEventListener('click', () => {
-            if (floors.length > 1) {
-                const confirmed = confirm(`Remove ${floors[floors.length - 1].name}? All walls on this floor will be deleted.`);
-                if (confirmed) {
-                    const removedFloorId = floors[floors.length - 1].id;
-                    floors.pop();
-                    walls = walls.filter(w => w.floorId !== removedFloorId);
-                    if (currentFloorId === removedFloorId) {
-                        currentFloorId = floors[floors.length - 1].id;
-                    }
-                    updateFloorDropdown();
-                    document.getElementById('currentFloor').value = currentFloorId;
-                    draw();
-                    validateAllWalls();
-                }
-            }
-        });
-        
-        document.getElementById('currentFloor').addEventListener('change', (e) => {
-            currentFloorId = parseInt(e.target.value);
-            selectedWall = null;
-            draw();
-            validateAllWalls();
-        });
-        
-        document.getElementById('showOtherFloors').addEventListener('change', draw);
-        
-        // Initialize UI
-        updateFloorDropdown();
-        updateModeUI();
-        updateUI();
-        
-        // Show initial message
-        document.getElementById('violationsList').innerHTML = 
-            '<div class="no-violations">Draw walls to start. Click once for start point, move horizontally or vertically, then click for end point.</div>';
-        }
 
-        function updateFloorDropdown() {
-            const select = document.getElementById('currentFloor');
-            select.innerHTML = '';
-            floors.forEach(floor => {
-                const option = document.createElement('option');
-                option.value = floor.id;
-                option.textContent = floor.name;
-                select.appendChild(option);
-            });
-            select.value = currentFloorId;
-        }
 
         function updateModeUI() {
             document.querySelectorAll('.tool-buttons .btn-primary').forEach(btn => {
@@ -1604,9 +1105,11 @@
 
             if (currentMode === 'draw') {
                 document.getElementById('drawWallBtn').classList.add('active');
+                document.getElementById('modeInfo').textContent = 'Draw';
                 canvas.style.cursor = 'crosshair';
             } else if (currentMode === 'select') {
                 document.getElementById('selectBtn').classList.add('active');
+                document.getElementById('modeInfo').textContent = 'Select';
                 canvas.style.cursor = 'pointer';
             }
         }
@@ -1618,10 +1121,19 @@
 
             if (selectedWall) {
                 document.getElementById('wallThickness').value = selectedWall.thickness;
+                document.getElementById('wallHeight').value = selectedWall.height;
             }
 
             draw();
         }
+
+        // Initialize
+        updateModeUI();
+        updateUI();
+        
+        // Show initial message
+        document.getElementById('violationsList').innerHTML = 
+            '<div class="no-violations">Draw walls to start. Click once for start point, move horizontally or vertically, then click for end point.</div>';
     </script>
 </body>
 </html>

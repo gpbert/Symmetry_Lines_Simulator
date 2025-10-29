@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; padding: 20px; }
+        #testCanvas { border: 2px solid red; background: white; }
+    </style>
+</head>
+<body>
+    <h1>Grid Test</h1>
+    <canvas id="testCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+        const MM_TO_PX = 0.5;
+        const GRID_SIZE_EXTERNAL = 300;
+        const GRID_SIZE_INTERNAL = 100;
+        
+        function mmToPx(mm) {
+            return mm * MM_TO_PX;
+        }
+        
+        const gridStepExternal = mmToPx(GRID_SIZE_EXTERNAL);
+        const gridStepInternal = mmToPx(GRID_SIZE_INTERNAL);
+        
+        console.log('gridStepExternal:', gridStepExternal);
+        console.log('gridStepInternal:', gridStepInternal);
+        
+        // Draw 300mm grid
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 2;
+        for (let x = 0; x <= canvas.width; x += gridStepExternal) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
+        for (let y = 0; y <= canvas.height; y += gridStepExternal) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
+        
+        ctx.fillStyle = 'black';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('Grid step: ' + gridStepExternal + 'px', 10, 30);
+    </script>
+</body>
+</html>
