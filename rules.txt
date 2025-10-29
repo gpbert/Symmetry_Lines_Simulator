@@ -1,0 +1,137 @@
+SDI - RB 
+Positional Rules: 
+ 
+Reviewers: 
+Brendan Hasty, Anton Kerezov, Mattia Zucco. 
+ 
+Objective: 
+The aim of this document is to describe the minimum set of positional rules for the macro elements  (such as Walls, Slabs and 
+Stairs) of the ZuruTech Product, that allow the final assemblage to undergo a clash-free manufacturing process. This document 
+is intended as an integration of the official PD Documentation. 
+ 
+Premise: 
+Every structural element is set on a 100x100 mm grid that is derived from the Slab’s Rebars distance. This grid also shapes 
+how the Slab behaves and how key elements, such as Structural Walls, Voids and Columns, interact with each other. The 
+following set of Rules ensure that all structural elements are arranged so they make manufacturing compliant configurations. 
+ 
+Lexicon: 
+Slab’s Rebars’ Grid: 100x100mm Grid. 
+Pod’s Grid: Described in the Slab chapter. 
+User’s Grid: The grid the User draws on, described in the Strategies chapter. 
+ 
+ 
+ 
+  
+
+SDI - RB 
+Structural Walls: 
+AAC Walls use AAC blocks with Steel Columns set along the internal face of the Wall. Every Wall needs at least two Steel 
+Columns, one at each end. Walls have maximum length of 6m. There could be internal columns in the Walls for structural 
+needs. Shall there be an opening – the Wall is split into smaller Walls. 
+Steel Columns have a 10x10cm 2d basis, which moves on the Slab’s Rebars’ Grid with its sides; Steel Columns are aligned 
+in the length direction of the Wall. 
+In the current strategy, Walls can only snap their length to a 60cm grid. 
+ 
+The requirements of this chapter are based on these assumptions: 
+- Steel Columns are on the side. 
+- Current Pod catalogue (v1.5). 
+- A connected Slab has a unique Pod’s Grid. 
+- Walls sit on multiple planes representing floors, that will be called Floor Planes. 
+ 
+A Wall can be described as (Image 1): 
+- Two Points, A and B: 
+o Positioned on the external face of the Wall containing the Steel Columns, at the two corners of the Wall, 
+Floor Plane level. 
+o Always positioned so that the Right-Hand cross product between a vertical up vector and  𝐴𝐵⃗⃗⃗⃗⃗   is a vector 
+with same direction to a vector 𝑡  taken from A or B and going into the direction of the other Wall’s face. 
+(Image 2). 
+- Two vectors, 𝑑  and 𝑛⃗ : 𝑑  is equal to 𝐴𝐵⃗⃗⃗⃗⃗  and 𝑛⃗  is the Right-Hand cross product between 𝐴𝐵⃗⃗⃗⃗⃗  and is the Right-Hand 
+cross product between a vertical-up vector. 
+- Two scalar values, h and t: h represents the height: h represents the height of the Wall, which ranges from 2500mm 
+to 3100mm in steps of 100mm  and t is the thickness of the Wall, also a discrete  of the Wall as a discrete value 
+ranging from 2500 to 3100 mm with 100 mm increments, while t represents the nominal thickness of the Wall, 200 
+mm or 300 mm 
+  
+ 
+Image 1. 
+ 
+Image 2. 
+ 
+The requirements will be described for any couple of Walls that participate to the same Slab and are either sitting on the 
+same Floor or in two consecutive Floors. Requirements: 
+1. Across the same Floor Plane each segment is separate and cannot overlap. Aligned Walls must share orientation 
+and thickness. 
+2. Across different Floor Planes, overlapping segments must share orientation and thickness. 
+3. Minimum distance: 
+
+SDI - RB 
+a. Aligned Walls must comply with requirements 1 and 2. If not aligned, minimum distance between parallel 
+Walls is 600mm , Column’s face to Column’s face,  except for the case of opposite orientation facing 
+opposite, which requires 1200mm.  
+b. Between Perpendicular Walls there is no need for a minimum distance. 
+ 
+ 
+4. Each Wall making up the envelope of the building has its extremes connected with another Wall, either with a 90-
+degree angle or a 270-degree angle (this requirement excludes Blade Walls as a Product). 
+5. Minimum Length for a Wall should be 400mm from the 2 faces of the Wall (e.g. Wall between Openings), maximum 
+length is bound to the Container dimension and is currently 6000mm. 
+6. Interaction with Slab: 
+a. When interfacing with a Slab the Structural Wall generates a Beam: 
+i. At least as thick as the Wall, with 2 Rebars under the Steel Column, on its sides. 
+ii. At least as long as the Wall, terminating on the Pod’s Grid. 
+ 
+7. Interaction with Voids: 
+a. Internal Wall: The Void can be 0mm to the face of the Wall without Steel Column. The Steel Column must 
+be on the opposite face of the Wall. 
+b. External Walls: The Void can be 0mm from the face of the Wall that has a Steel Column, interrupting the 
+Edge Beam at the segment’s ends and substituting the central part  with a prefab Beam , thus forming a 
+flush surface between the 2 consecutive Walls. 
+  
+
+SDI - RB 
+Slab: 
+A Slab is a Waffle Slab, made by combining concrete Beams and plastic Pods to make up the Pod’s Grid. The  Pod’s Grid 
+is made of rectangular Cells, using these standard sizes: 
+- 600 × 600 mm 
+- 600 × 900 mm 
+- 900 × 900 mm 
+Inside the Cell a Pod is always present, coherent with the Pod Catalog. 
+Requirements are the following: 
+1. The Pod’s Grid must produce a lattice without any rectangle with sides less than 600mm in it.  All influencing 
+elements (Walls, Voids, Columns) must combine into a consistent, gap -free grid, with no segments narrower than 
+600 mm. 
+2. Each edge of a Slab’s perimeter has an Edge Beam, in the following configurations: 
+a. Matching a Structural Wall: The Edge Beam has the innermost Rebar (steel reinforcement) on the Pod’s 
+Grid. 
+b. Free: The Edge Beam has the outermost Rebar on the Pod’s Grid. 
+ 
+3. Minimum distances for the Slab refer only to the free edges and are bound to the Pod Catalog. 
+4. Every Beam that does not terminate with two convex corners has a virtual continuation in the Slab. 
+ 
+5. The Slab’s elements that contain Rebars must comply with the Pod Catalogue. This ensures the layout is factory 
+compliant. 
+  
+
+SDI - RB 
+Columns: 
+- 
+  
+SDI - RB 
+Current Strategy: 
+600mm Grid. 
+ 
+Next Future Strategy: 
+600mm Grid with additional limitations on the Walls, (requirement 3 needs to be implemented). Minimum dimension on the 
+Slab Extension (requirement 3). 
+ 
+Having a 600mm User Grid already in place and knowing Walls are snapping on said Grid with their Column’s face (Interior 
+Side), implementing a minimum distance between Walls (face to face) of 300mm (thickness of the Wall plus external panel) 
+should be sufficient. 
+ 
+Future Strategy: 
+300mm grid external + 100mm internal with local limitations. 
+  
+SDI - RB 
+Next Steps: 
+This document is not suited for company access and consultation, both in form and content. The next step should be to find 
+a database structure to contain these rules and information, allowing for agile consultation and versioning. 
