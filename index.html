@@ -198,41 +198,140 @@
             color: #333;
         }
 
-        .violations-panel {
-            padding: 20px;
-            max-height: 300px;
-            overflow-y: auto;
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            animation: fadeIn 0.2s ease;
         }
 
-        .violation-item {
-            background: #fff3e0;
-            border-left: 4px solid #ff9800;
-            padding: 12px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            font-size: 13px;
+        .modal.show {
+            display: block;
         }
 
-        .violation-item.error {
-            background: #ffebee;
-            border-left-color: #f44336;
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
-        .violation-title {
+        .modal-content {
+            background-color: #ffffff;
+            margin: 3% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 85vh;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            animation: slideDown 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 30px;
+            border-bottom: 2px solid #e0e0e0;
+            background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+            color: white;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 24px;
             font-weight: 600;
-            margin-bottom: 4px;
-            color: #d84315;
         }
 
-        .violation-item.error .violation-title {
-            color: #c62828;
+        .modal-close {
+            font-size: 32px;
+            font-weight: 300;
+            color: white;
+            cursor: pointer;
+            line-height: 1;
+            transition: transform 0.2s ease;
         }
 
-        .no-violations {
-            text-align: center;
+        .modal-close:hover {
+            transform: scale(1.2);
+        }
+
+        .modal-body {
+            padding: 30px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .modal-intro {
+            font-size: 15px;
+            color: #555;
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            border-radius: 4px;
+        }
+
+        .rule-section {
+            margin-bottom: 28px;
             padding: 20px;
-            color: #4caf50;
-            font-weight: 500;
+            background: #fafafa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .rule-section h3 {
+            margin: 0 0 16px 0;
+            color: #1976d2;
+            font-size: 18px;
+            font-weight: 600;
+            border-bottom: 2px solid #1976d2;
+            padding-bottom: 8px;
+        }
+
+        .rule-section ul {
+            margin: 0;
+            padding-left: 24px;
+            list-style-type: none;
+        }
+
+        .rule-section li {
+            margin-bottom: 12px;
+            line-height: 1.6;
+            color: #333;
+            position: relative;
+        }
+
+        .rule-section li:before {
+            content: "▸";
+            position: absolute;
+            left: -18px;
+            color: #1976d2;
+            font-weight: bold;
+        }
+
+        .rule-section li strong {
+            color: #1565c0;
         }
 
         .stats {
@@ -282,6 +381,9 @@
                 <button id="deleteBtn" class="btn btn-danger">
                     🗑️ Delete Selected
                 </button>
+                <button id="flipWallBtn" class="btn btn-secondary">
+                    🔄 Flip Wall (Space)
+                </button>
             </div>
         </div>
 
@@ -304,7 +406,7 @@
             <div class="property-group">
                 <label class="checkbox-label">
                     <input type="checkbox" id="showOtherFloors" checked>
-                    Show Adjacent Floors
+                    Show Trace
                 </label>
             </div>
         </div>
@@ -312,10 +414,10 @@
         <div class="tools-section">
             <div class="section-title">Wall Properties</div>
             <div class="property-group">
-                <label for="wallThickness">Thickness (mm)</label>
+                <label for="wallThickness">Thickness (cm)</label>
                 <select id="wallThickness">
-                    <option value="200">200 mm</option>
-                    <option value="300">300 mm</option>
+                    <option value="200">20 cm</option>
+                    <option value="300">30 cm</option>
                 </select>
             </div>
             <div class="property-group">
@@ -338,15 +440,12 @@
                 <button id="clearAllBtn" class="btn btn-secondary">
                     🔄 Clear All
                 </button>
+                <button id="showRulesBtn" class="btn btn-secondary">
+                    📋 Positional Rules
+                </button>
             </div>
         </div>
 
-        <div class="violations-panel">
-            <div class="section-title">Validation Results</div>
-            <div id="violationsList">
-                <div class="no-violations">No walls drawn yet</div>
-            </div>
-        </div>
     </div>
 
     <div class="main-content">
@@ -385,12 +484,19 @@
         let currentMode = 'draw';
         let drawingWall = null;
         let tempPoint = null;
+        let wallFlipped = false; // Track if wall is flipped during drawing
         
         // Floor management
         let floors = [
             { id: 0, name: 'Ground Floor', height: 0 }
         ];
         let currentFloorId = 0;
+        
+        // Pan and Zoom state
+        let panOffset = { x: 0, y: 0 };
+        let zoomLevel = 1.0;
+        let isPanning = false;
+        let lastPanPos = { x: 0, y: 0 };
 
         // Canvas variables
         let canvas, ctx;
@@ -640,44 +746,60 @@
             const showGridCheckbox = document.getElementById('showGrid');
             if (showGridCheckbox && !showGridCheckbox.checked) return;
             
-            console.log('Drawing grid...');
             const gridStepExternal = mmToPx(GRID_SIZE_EXTERNAL);
             const gridStepInternal = mmToPx(GRID_SIZE_INTERNAL);
-            console.log('Grid steps:', gridStepExternal, gridStepInternal);
+
+            // Calculate visible world bounds (in pixels) accounting for pan/zoom
+            const visibleLeft = -panOffset.x / zoomLevel;
+            const visibleTop = -panOffset.y / zoomLevel;
+            const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
+            const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
+            
+            // Round to grid boundaries
+            const startX = Math.floor(visibleLeft / gridStepExternal) * gridStepExternal;
+            const endX = Math.ceil(visibleRight / gridStepExternal) * gridStepExternal;
+            const startY = Math.floor(visibleTop / gridStepExternal) * gridStepExternal;
+            const endY = Math.ceil(visibleBottom / gridStepExternal) * gridStepExternal;
 
             // Draw 300mm grid (external) - DARK, thicker lines
             ctx.strokeStyle = '#999999';
-            ctx.lineWidth = 2;
-            for (let x = 0; x <= canvas.width; x += gridStepExternal) {
+            ctx.lineWidth = 2 / zoomLevel; // Adjust line width for zoom
+            for (let x = startX; x <= endX; x += gridStepExternal) {
                 ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, canvas.height);
+                ctx.moveTo(x, visibleTop);
+                ctx.lineTo(x, visibleBottom);
                 ctx.stroke();
             }
-            for (let y = 0; y <= canvas.height; y += gridStepExternal) {
+            for (let y = startY; y <= endY; y += gridStepExternal) {
                 ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(canvas.width, y);
+                ctx.moveTo(visibleLeft, y);
+                ctx.lineTo(visibleRight, y);
                 ctx.stroke();
             }
 
             // Draw 100mm grid (internal) - lighter lines
             ctx.strokeStyle = '#dddddd';
-            ctx.lineWidth = 0.5;
-            for (let x = 0; x <= canvas.width; x += gridStepInternal) {
+            ctx.lineWidth = 0.5 / zoomLevel; // Adjust line width for zoom
+            
+            const startXInternal = Math.floor(visibleLeft / gridStepInternal) * gridStepInternal;
+            const endXInternal = Math.ceil(visibleRight / gridStepInternal) * gridStepInternal;
+            const startYInternal = Math.floor(visibleTop / gridStepInternal) * gridStepInternal;
+            const endYInternal = Math.ceil(visibleBottom / gridStepInternal) * gridStepInternal;
+            
+            for (let x = startXInternal; x <= endXInternal; x += gridStepInternal) {
                 // Skip if it's on a 300mm line
                 if (Math.abs(x % gridStepExternal) < 0.5) continue;
                 ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, canvas.height);
+                ctx.moveTo(x, visibleTop);
+                ctx.lineTo(x, visibleBottom);
                 ctx.stroke();
             }
-            for (let y = 0; y <= canvas.height; y += gridStepInternal) {
+            for (let y = startYInternal; y <= endYInternal; y += gridStepInternal) {
                 // Skip if it's on a 300mm line
                 if (Math.abs(y % gridStepExternal) < 0.5) continue;
                 ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(canvas.width, y);
+                ctx.moveTo(visibleLeft, y);
+                ctx.lineTo(visibleRight, y);
                 ctx.stroke();
             }
         }
@@ -692,9 +814,18 @@
             // Determine if wall is horizontal or vertical
             const isHorizontal = Math.abs(wall.d.y) < Math.abs(wall.d.x);
 
-            // Use canvas dimensions to make zones "infinite"
-            const canvasMaxX = pxToMm(canvas.width);
-            const canvasMaxY = pxToMm(canvas.height);
+            // Calculate truly infinite bounds based on visible area + large margin
+            const visibleLeft = -panOffset.x / zoomLevel;
+            const visibleTop = -panOffset.y / zoomLevel;
+            const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
+            const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
+            
+            // Add large margin to make zones effectively infinite
+            const margin = 100000; // 100 meters in pixels
+            const infiniteLeft = pxToMm(visibleLeft - margin);
+            const infiniteRight = pxToMm(visibleRight + margin);
+            const infiniteTop = pxToMm(visibleTop - margin);
+            const infiniteBottom = pxToMm(visibleBottom + margin);
 
             if (isHorizontal) {
                 // Horizontal wall - restricted zones extend infinitely along X
@@ -704,9 +835,9 @@
                 const oppositeY = internalY + (wall.n.y > 0 ? MIN_DISTANCE_OPPOSITE : -MIN_DISTANCE_OPPOSITE);
                 zones.push({
                     type: 'opposite',
-                    x1: 0,
+                    x1: infiniteLeft,
                     y1: Math.min(internalY, oppositeY),
-                    x2: canvasMaxX,
+                    x2: infiniteRight,
                     y2: Math.max(internalY, oppositeY),
                     distance: MIN_DISTANCE_OPPOSITE
                 });
@@ -715,9 +846,9 @@
                 const parallelY = internalY + (wall.n.y > 0 ? -MIN_DISTANCE_PARALLEL : MIN_DISTANCE_PARALLEL);
                 zones.push({
                     type: 'parallel',
-                    x1: 0,
+                    x1: infiniteLeft,
                     y1: Math.min(internalY, parallelY),
-                    x2: canvasMaxX,
+                    x2: infiniteRight,
                     y2: Math.max(internalY, parallelY),
                     distance: MIN_DISTANCE_PARALLEL
                 });
@@ -730,9 +861,9 @@
                 zones.push({
                     type: 'opposite',
                     x1: Math.min(internalX, oppositeX),
-                    y1: 0,
+                    y1: infiniteTop,
                     x2: Math.max(internalX, oppositeX),
-                    y2: canvasMaxY,
+                    y2: infiniteBottom,
                     distance: MIN_DISTANCE_OPPOSITE
                 });
 
@@ -741,9 +872,9 @@
                 zones.push({
                     type: 'parallel',
                     x1: Math.min(internalX, parallelX),
-                    y1: 0,
+                    y1: infiniteTop,
                     x2: Math.max(internalX, parallelX),
-                    y2: canvasMaxY,
+                    y2: infiniteBottom,
                     distance: MIN_DISTANCE_PARALLEL
                 });
             }
@@ -802,9 +933,26 @@
                     
                     // Aligned walls (on same line)
                     if (dist < 10) {
+                        // Check for overlap
+                        const hasOverlap = newWall.overlapsInProjection(existingWall);
+                        
+                        if (hasOverlap && onDifferentFloor) {
+                            // Rule 2: Cross-floor overlapping walls must share orientation and thickness
+                            const sameOrientation = newWall.sameOrientation(existingWall);
+                            const sameThickness = Math.abs(newWall.thickness - existingWall.thickness) < 1;
+                            
+                            if (!sameOrientation || !sameThickness) {
+                                return {
+                                    restricted: true,
+                                    wall: existingWall,
+                                    zone: { distance: 0, reason: 'Cross-floor overlap requires matching thickness and orientation' }
+                                };
+                            }
+                        }
+                        
                         // Rule 1 (same floor): Aligned walls allowed if same orientation/thickness and no overlap
                         // Rule 2 (different floors): Overlapping allowed if same orientation/thickness
-                        // So aligned walls are never a restriction if they meet the criteria
+                        // If we got here, the rules are satisfied
                         continue;
                     }
                     
@@ -937,7 +1085,7 @@
                 ctx.font = 'bold 14px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.fillText(
-                    `${Math.round(wall.length)}mm (${wall.thickness}mm thick)`,
+                    `${Math.round(wall.length / 10)}cm (${wall.thickness / 10}cm thick)`,
                     mmToPx(midX),
                     mmToPx(midY) - 15
                 );
@@ -957,22 +1105,28 @@
             
             console.log('Drawing on canvas:', canvas.width, 'x', canvas.height);
             
-            // White background
+            // Clear and fill background (before transformation)
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
+            // Apply pan and zoom transformation
+            ctx.setTransform(zoomLevel, 0, 0, zoomLevel, panOffset.x, panOffset.y);
+            
             drawGrid();
 
-            // Draw walls from adjacent floors first (if enabled)
+            // Draw walls from floors below (trace) if enabled
             if (document.getElementById('showOtherFloors').checked) {
                 walls.forEach((wall, idx) => {
-                    // Draw walls from floor below
-                    if (wall.floorId === currentFloorId - 1) {
-                        drawWall(wall, false, [], 0.3, '#90A4AE'); // Light gray, semi-transparent
-                    }
-                    // Draw walls from floor above
-                    else if (wall.floorId === currentFloorId + 1) {
-                        drawWall(wall, false, [], 0.2, '#B0BEC5'); // Lighter gray, more transparent
+                    // Only show floors below the current floor
+                    if (wall.floorId < currentFloorId) {
+                        // Calculate opacity based on distance from current floor
+                        // 1 floor below = 0.4 opacity, 2 floors = 0.25, 3 floors = 0.15, etc.
+                        const floorsBelow = currentFloorId - wall.floorId;
+                        const opacity = Math.max(0.1, 0.5 - (floorsBelow * 0.15));
+                        
+                        // Lighter gray color for trace
+                        drawWall(wall, false, [], opacity, '#90A4AE');
                     }
                 });
             }
@@ -1006,13 +1160,21 @@
 
             // Draw temporary wall while drawing
             if (drawingWall && tempPoint && (drawingWall.x !== tempPoint.x || drawingWall.y !== tempPoint.y)) {
+                // Apply flip by swapping start/end if flipped
+                const startX = wallFlipped ? tempPoint.x : drawingWall.x;
+                const startY = wallFlipped ? tempPoint.y : drawingWall.y;
+                const endX = wallFlipped ? drawingWall.x : tempPoint.x;
+                const endY = wallFlipped ? drawingWall.y : tempPoint.y;
+                
                 const tempWall = new Wall(
-                    drawingWall.x,
-                    drawingWall.y,
-                    tempPoint.x,
-                    tempPoint.y,
+                    startX,
+                    startY,
+                    endX,
+                    endY,
                     parseInt(document.getElementById('wallThickness').value),
-                    2700 // Default height
+                    2700, // Default height
+                    null, // No groupId for preview
+                    currentFloorId // Preview on current floor
                 );
                 
                 // Calculate wall segments if longer than MAX_WALL_LENGTH
@@ -1026,12 +1188,12 @@
                         const endRatio = (i + 1) / numSegments;
                         
                         let segStart = {
-                            x: drawingWall.x + tempWall.d.x * startRatio,
-                            y: drawingWall.y + tempWall.d.y * startRatio
+                            x: tempWall.pointA.x + tempWall.d.x * startRatio,
+                            y: tempWall.pointA.y + tempWall.d.y * startRatio
                         };
                         let segEnd = {
-                            x: drawingWall.x + tempWall.d.x * endRatio,
-                            y: drawingWall.y + tempWall.d.y * endRatio
+                            x: tempWall.pointA.x + tempWall.d.x * endRatio,
+                            y: tempWall.pointA.y + tempWall.d.y * endRatio
                         };
                         
                         // Snap junction points to 100mm grid (columns must be on grid)
@@ -1182,21 +1344,21 @@
                     );
                     ctx.font = '12px sans-serif';
                     ctx.fillText(
-                        `Min distance: ${restriction.zone.distance}mm`,
+                        `Min distance: ${restriction.zone.distance / 10}cm`,
                         mmToPx(midX),
                         mmToPx(midY) + 10
                     );
                 } else {
-                    const totalLength = Math.round(tempWall.length);
+                    const totalLength = Math.round(tempWall.length / 10);
                     if (wallSegments.length > 1) {
                         ctx.fillText(
-                            `${totalLength}mm (${wallSegments.length} walls)`,
+                            `${totalLength}cm (${wallSegments.length} walls)`,
                             mmToPx(midX),
                             mmToPx(midY) - 10
                         );
                     } else {
                         ctx.fillText(
-                            `${totalLength}mm`,
+                            `${totalLength}cm`,
                             mmToPx(midX),
                             mmToPx(midY) - 10
                         );
@@ -1233,14 +1395,14 @@
             if (wall.length < MIN_WALL_LENGTH) {
                 violations.push({
                     type: 'error',
-                    message: `Wall is too short (${Math.round(wall.length)}mm). Minimum: ${MIN_WALL_LENGTH}mm`
+                    message: `Wall is too short (${Math.round(wall.length / 10)}cm). Minimum: ${MIN_WALL_LENGTH / 10}cm`
                 });
             }
 
             if (wall.length > MAX_WALL_LENGTH) {
                 violations.push({
                     type: 'error',
-                    message: `Wall is too long (${Math.round(wall.length)}mm). Maximum: ${MAX_WALL_LENGTH}mm`
+                    message: `Wall is too long (${Math.round(wall.length / 10)}cm). Maximum: ${MAX_WALL_LENGTH / 10}cm`
                 });
             }
 
@@ -1306,7 +1468,7 @@
                             if (dist < minDist) {
                                 violations.push({
                                     type: 'error',
-                                    message: `Too close to Wall ${otherIndex + 1} (${Math.round(dist)}mm). Minimum: ${minDist}mm`
+                                    message: `Too close to Wall ${otherIndex + 1} (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm`
                                 });
                             }
                         }
@@ -1390,8 +1552,17 @@
 
         function getMousePosition(e) {
             const rect = canvas.getBoundingClientRect();
-            let x = pxToMm(e.clientX - rect.left);
-            let y = pxToMm(e.clientY - rect.top);
+            // Get mouse position in canvas pixels
+            const canvasX = e.clientX - rect.left;
+            const canvasY = e.clientY - rect.top;
+            
+            // Transform from screen space to world space (inverse of pan/zoom)
+            const worldX = (canvasX - panOffset.x) / zoomLevel;
+            const worldY = (canvasY - panOffset.y) / zoomLevel;
+            
+            // Convert to mm
+            let x = pxToMm(worldX);
+            let y = pxToMm(worldY);
 
             // Always snap to 300mm external grid
             x = snapToGrid(x, GRID_SIZE_EXTERNAL);
@@ -1420,7 +1591,48 @@
         }
 
         function setupEventListeners() {
+        // Pan and Zoom event listeners
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // Zoom in/out (reduced sensitivity)
+            const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
+            const newZoom = Math.max(0.5, Math.min(2, zoomLevel * zoomFactor));
+            
+            // Zoom toward mouse position
+            const worldXBefore = (mouseX - panOffset.x) / zoomLevel;
+            const worldYBefore = (mouseY - panOffset.y) / zoomLevel;
+            
+            zoomLevel = newZoom;
+            
+            panOffset.x = mouseX - worldXBefore * zoomLevel;
+            panOffset.y = mouseY - worldYBefore * zoomLevel;
+            
+            draw();
+        }, { passive: false });
+        
+        canvas.addEventListener('mouseup', (e) => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = currentMode === 'draw' ? 'crosshair' : 'pointer';
+            }
+        });
+        
         canvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                const dx = e.clientX - lastPanPos.x;
+                const dy = e.clientY - lastPanPos.y;
+                panOffset.x += dx;
+                panOffset.y += dy;
+                lastPanPos = { x: e.clientX, y: e.clientY };
+                draw();
+                return;
+            }
+            
             const pos = getMousePosition(e);
             currentMousePos = pos;
 
@@ -1441,11 +1653,25 @@
         });
 
         canvas.addEventListener('mouseleave', () => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = currentMode === 'draw' ? 'crosshair' : 'pointer';
+            }
             currentMousePos = null;
             draw();
         });
 
         canvas.addEventListener('mousedown', (e) => {
+            // Check for panning first
+            if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
+                // Middle mouse or Ctrl+Left mouse for panning
+                isPanning = true;
+                lastPanPos = { x: e.clientX, y: e.clientY };
+                canvas.style.cursor = 'grabbing';
+                e.preventDefault();
+                return;
+            }
+            
             const pos = getMousePosition(e);
 
             if (currentMode === 'draw') {
@@ -1468,17 +1694,25 @@
                         finalPos = { x: drawingWall.x, y: pos.y };
                     }
                     
+                    // Apply flip by swapping start/end if flipped
+                    const startX = wallFlipped ? finalPos.x : drawingWall.x;
+                    const startY = wallFlipped ? finalPos.y : drawingWall.y;
+                    const endX = wallFlipped ? drawingWall.x : finalPos.x;
+                    const endY = wallFlipped ? drawingWall.y : finalPos.y;
+                    
                     const newWall = new Wall(
-                        drawingWall.x,
-                        drawingWall.y,
-                        finalPos.x,
-                        finalPos.y,
+                        startX,
+                        startY,
+                        endX,
+                        endY,
                         thickness,
-                        height
+                        height,
+                        null, // No groupId for single walls
+                        currentFloorId // Assign to current floor
                     );
 
                     if (newWall.length < MIN_WALL_LENGTH) {
-                        alert(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH}mm`);
+                        alert(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`);
                         drawingWall = null;
                         tempPoint = null;
                         draw();
@@ -1496,12 +1730,12 @@
                             const endRatio = (i + 1) / numSegments;
                             
                             let segStart = {
-                                x: drawingWall.x + newWall.d.x * startRatio,
-                                y: drawingWall.y + newWall.d.y * startRatio
+                                x: newWall.pointA.x + newWall.d.x * startRatio,
+                                y: newWall.pointA.y + newWall.d.y * startRatio
                             };
                             let segEnd = {
-                                x: drawingWall.x + newWall.d.x * endRatio,
-                                y: drawingWall.y + newWall.d.y * endRatio
+                                x: newWall.pointA.x + newWall.d.x * endRatio,
+                                y: newWall.pointA.y + newWall.d.y * endRatio
                             };
                             
                             // Snap junction points to 100mm grid (columns must be on grid)
@@ -1532,7 +1766,13 @@
                     for (let segment of wallSegments) {
                         const restriction = isWallInRestrictedZone(segment);
                         if (restriction.restricted) {
-                            alert(`Cannot place wall here. Too close to existing wall.\nMinimum distance required: ${restriction.zone.distance}mm`);
+                            let message = 'Cannot place wall here.';
+                            if (restriction.zone.reason) {
+                                message += `\n${restriction.zone.reason}`;
+                            } else if (restriction.zone.distance) {
+                                message += `\nToo close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                            }
+                            alert(message);
                             drawingWall = null;
                             tempPoint = null;
                             draw();
@@ -1541,10 +1781,13 @@
                     }
 
                     // Add all segments to walls array
-                    wallSegments.forEach(segment => walls.push(segment));
+                    wallSegments.forEach(segment => {
+                        walls.push(segment);
+                    });
                     
                     drawingWall = null;
                     tempPoint = null;
+                    wallFlipped = false; // Reset flip state
                     updateUI();
                     validateAllWalls();
                 }
@@ -1567,6 +1810,7 @@
             currentMode = 'draw';
             drawingWall = null;
             tempPoint = null;
+            wallFlipped = false;
             updateModeUI();
         });
 
@@ -1574,6 +1818,7 @@
             currentMode = 'select';
             drawingWall = null;
             tempPoint = null;
+            wallFlipped = false;
             updateModeUI();
         });
 
@@ -1588,6 +1833,22 @@
                 }
             }
         });
+        
+        document.getElementById('flipWallBtn').addEventListener('click', () => {
+            if (drawingWall && tempPoint) {
+                wallFlipped = !wallFlipped;
+                draw();
+            }
+        });
+        
+        // Space key to flip wall during drawing
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && drawingWall && tempPoint) {
+                e.preventDefault(); // Prevent page scroll
+                wallFlipped = !wallFlipped;
+                draw();
+            }
+        });
 
         document.getElementById('clearAllBtn').addEventListener('click', () => {
             if (walls.length > 0 && confirm('Are you sure you want to clear all walls?')) {
@@ -1597,6 +1858,26 @@
                 tempPoint = null;
                 updateUI();
                 draw();
+            }
+        });
+        
+        // Rules Modal
+        const rulesModal = document.getElementById('rulesModal');
+        const showRulesBtn = document.getElementById('showRulesBtn');
+        const modalClose = document.querySelector('.modal-close');
+        
+        showRulesBtn.addEventListener('click', () => {
+            rulesModal.classList.add('show');
+        });
+        
+        modalClose.addEventListener('click', () => {
+            rulesModal.classList.remove('show');
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target === rulesModal) {
+                rulesModal.classList.remove('show');
             }
         });
 
@@ -1702,6 +1983,75 @@
             draw();
         }
     </script>
+
+    <!-- Rules Modal -->
+    <div id="rulesModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Positional Rules</h2>
+                <span class="modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p class="modal-intro">The following rules from the original specification are currently implemented in this simulator:</p>
+                
+                <div class="rule-section">
+                    <h3>1. Wall Dimensions</h3>
+                    <ul>
+                        <li><strong>Minimum Length:</strong> 40 cm from the 2 faces of the wall</li>
+                        <li><strong>Maximum Length:</strong> 600 cm (walls longer than this are automatically split into segments)</li>
+                        <li><strong>Thickness Options:</strong> 20 cm or 30 cm</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>2. Grid Alignment</h3>
+                    <ul>
+                        <li><strong>Grid Strategy:</strong> 30 cm external grid + 10 cm internal subdivisions</li>
+                        <li><strong>Internal Face (Blue Line):</strong> Must be aligned to the 30 cm grid lines</li>
+                        <li><strong>Column Positions:</strong> Columns snap to the 10 cm internal grid at both ends of each wall segment</li>
+                        <li><strong>Orientation:</strong> Walls can only be drawn horizontally or vertically</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>3. Same Floor Plane Rules</h3>
+                    <ul>
+                        <li><strong>Overlapping Walls:</strong> Each segment is separate and cannot overlap</li>
+                        <li><strong>Aligned Walls:</strong> Walls on the same grid line must share orientation (same direction) and thickness</li>
+                        <li><strong>No Overlap:</strong> Aligned walls cannot overlap in their projection along the wall direction</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>4. Different Floor Plane Rules</h3>
+                    <ul>
+                        <li><strong>Vertical Stacking:</strong> Walls on different floors can overlap</li>
+                        <li><strong>Matching Required:</strong> Overlapping segments across floors must share orientation and thickness</li>
+                        <li><strong>Trace View:</strong> Lower floors are shown with decreasing opacity for reference</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>5. Minimum Distances (Same Floor Only)</h3>
+                    <ul>
+                        <li><strong>Parallel Walls (Same Orientation):</strong> Minimum 60 cm distance (measured from blue line to blue line)</li>
+                        <li><strong>Parallel Walls (Opposite Orientation):</strong> Minimum 120 cm distance (measured from blue line to blue line)</li>
+                        <li><strong>Perpendicular Walls:</strong> No distance restrictions</li>
+                        <li><strong>Aligned Walls:</strong> Distance rules do not apply (can be adjacent or have gaps)</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>6. Visual Feedback</h3>
+                    <ul>
+                        <li><strong>Restricted Zones:</strong> Orange (60 cm) and red (120 cm) zones show where new walls cannot be placed</li>
+                        <li><strong>Preview Colors:</strong> Green preview indicates valid placement, red preview indicates rule violation</li>
+                        <li><strong>Validation:</strong> Real-time validation with detailed error messages</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 
