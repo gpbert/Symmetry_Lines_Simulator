@@ -528,7 +528,10 @@
                 const min2 = Math.min(a2, b2);
                 const max2 = Math.max(a2, b2);
 
-                return !(max1 < min2 || max2 < min1);
+                // Allow touching at endpoints (use <= to exclude touching walls)
+                // Add small tolerance for floating point comparisons
+                const tolerance = 1; // 1mm tolerance
+                return !(max1 <= min2 + tolerance || max2 <= min1 + tolerance);
             }
 
             distanceToWall(other) {
@@ -785,6 +788,9 @@
 
         function isWallInRestrictedZone(newWall) {
             for (let existingWall of walls) {
+                const onSameFloor = newWall.floorId === existingWall.floorId;
+                const onDifferentFloor = newWall.floorId !== existingWall.floorId;
+                
                 // Check if walls are perpendicular - no restriction
                 if (existingWall.isPerpendicularTo(newWall)) {
                     continue;
@@ -794,31 +800,43 @@
                 if (existingWall.isParallelTo(newWall)) {
                     const dist = newWall.distanceToWall(existingWall);
                     
-                    // Use dot product to determine minimum distance
-                    const dotProduct = newWall.n.x * existingWall.n.x + newWall.n.y * existingWall.n.y;
+                    // Aligned walls (on same line)
+                    if (dist < 10) {
+                        // Rule 1 (same floor): Aligned walls allowed if same orientation/thickness and no overlap
+                        // Rule 2 (different floors): Overlapping allowed if same orientation/thickness
+                        // So aligned walls are never a restriction if they meet the criteria
+                        continue;
+                    }
                     
-                    let minDist;
-                    if (dotProduct >= 0) {
-                        // Same side: 600mm
-                        minDist = MIN_DISTANCE_PARALLEL;
-                    } else {
-                        // Flipped - check if anti-parallel
-                        if (dotProduct < -0.9) {
-                            // Anti-parallel (opposite facing): 1200mm
-                            minDist = MIN_DISTANCE_OPPOSITE;
-                        } else {
-                            // Parallel but not anti-parallel: 600mm
+                    // Non-aligned parallel walls on same floor need minimum distance (Rule 3a)
+                    if (onSameFloor) {
+                        // Use dot product to determine minimum distance
+                        const dotProduct = newWall.n.x * existingWall.n.x + newWall.n.y * existingWall.n.y;
+                        
+                        let minDist;
+                        if (dotProduct >= 0) {
+                            // Same side: 600mm
                             minDist = MIN_DISTANCE_PARALLEL;
+                        } else {
+                            // Flipped - check if anti-parallel
+                            if (dotProduct < -0.9) {
+                                // Anti-parallel (opposite facing): 1200mm
+                                minDist = MIN_DISTANCE_OPPOSITE;
+                            } else {
+                                // Parallel but not anti-parallel: 600mm
+                                minDist = MIN_DISTANCE_PARALLEL;
+                            }
+                        }
+
+                        if (dist < minDist) {
+                            return { 
+                                restricted: true, 
+                                wall: existingWall, 
+                                zone: { distance: minDist }
+                            };
                         }
                     }
-
-                    if (dist < minDist) {
-                        return { 
-                            restricted: true, 
-                            wall: existingWall, 
-                            zone: { distance: minDist }
-                        };
-                    }
+                    // Different floors: no distance restriction (Rule 2 allows overlapping)
                 }
             }
             return { restricted: false };
@@ -888,17 +906,24 @@
             }
 
             // Column at A (on internal face - blue line)
+            // Position column in grid cell, aligned to internal corner
+            // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
+            const colAX = wall.pointA.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
+            const colAY = wall.pointA.y + (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
             ctx.fillRect(
-                mmToPx(wall.pointA.x) - columnSize / 2,
-                mmToPx(wall.pointA.y) - columnSize / 2,
+                mmToPx(colAX) - columnSize / 2,
+                mmToPx(colAY) - columnSize / 2,
                 columnSize,
                 columnSize
             );
 
             // Column at B (on internal face - blue line)
+            // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
+            const colBX = wall.pointB.x - (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
+            const colBY = wall.pointB.y - (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
             ctx.fillRect(
-                mmToPx(wall.pointB.x) - columnSize / 2,
-                mmToPx(wall.pointB.y) - columnSize / 2,
+                mmToPx(colBX) - columnSize / 2,
+                mmToPx(colBY) - columnSize / 2,
                 columnSize,
                 columnSize
             );
@@ -1000,14 +1025,25 @@
                         const startRatio = i / numSegments;
                         const endRatio = (i + 1) / numSegments;
                         
-                        const segStart = {
+                        let segStart = {
                             x: drawingWall.x + tempWall.d.x * startRatio,
                             y: drawingWall.y + tempWall.d.y * startRatio
                         };
-                        const segEnd = {
+                        let segEnd = {
                             x: drawingWall.x + tempWall.d.x * endRatio,
                             y: drawingWall.y + tempWall.d.y * endRatio
                         };
+                        
+                        // Snap junction points to 100mm grid (columns must be on grid)
+                        // First and last points are already snapped (from user drawing)
+                        if (i > 0) {
+                            segStart.x = snapToGrid(segStart.x, GRID_SIZE_INTERNAL);
+                            segStart.y = snapToGrid(segStart.y, GRID_SIZE_INTERNAL);
+                        }
+                        if (i < numSegments - 1) {
+                            segEnd.x = snapToGrid(segEnd.x, GRID_SIZE_INTERNAL);
+                            segEnd.y = snapToGrid(segEnd.y, GRID_SIZE_INTERNAL);
+                        }
                         
                         wallSegments.push(new Wall(
                             segStart.x, segStart.y,
@@ -1078,17 +1114,24 @@
                     ctx.fillStyle = isRestricted ? 'rgba(244, 67, 54, 0.5)' : 'rgba(76, 175, 80, 0.5)';
                     
                     // Column at A (on internal face - blue line)
+                    // Position column in grid cell, aligned to internal corner
+                    // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
+                    const colAX = segment.pointA.x + (COLUMN_SIZE / 2) * segment.dNorm.x + (COLUMN_SIZE / 2) * segment.n.x;
+                    const colAY = segment.pointA.y + (COLUMN_SIZE / 2) * segment.dNorm.y + (COLUMN_SIZE / 2) * segment.n.y;
                     ctx.fillRect(
-                        mmToPx(segment.pointA.x) - columnSize / 2,
-                        mmToPx(segment.pointA.y) - columnSize / 2,
+                        mmToPx(colAX) - columnSize / 2,
+                        mmToPx(colAY) - columnSize / 2,
                         columnSize,
                         columnSize
                     );
                     
                     // Column at B (on internal face - blue line)
+                    // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
+                    const colBX = segment.pointB.x - (COLUMN_SIZE / 2) * segment.dNorm.x + (COLUMN_SIZE / 2) * segment.n.x;
+                    const colBY = segment.pointB.y - (COLUMN_SIZE / 2) * segment.dNorm.y + (COLUMN_SIZE / 2) * segment.n.y;
                     ctx.fillRect(
-                        mmToPx(segment.pointB.x) - columnSize / 2,
-                        mmToPx(segment.pointB.y) - columnSize / 2,
+                        mmToPx(colBX) - columnSize / 2,
+                        mmToPx(colBY) - columnSize / 2,
                         columnSize,
                         columnSize
                     );
@@ -1212,7 +1255,7 @@
                 const onSameFloor = wall.floorId === otherWall.floorId;
                 const onAdjacentFloors = Math.abs(wall.floorId - otherWall.floorId) === 1;
 
-                // SAME FLOOR RULES
+                // SAME FLOOR RULES (Rule 1 & 3)
                 if (onSameFloor) {
                     // Check if walls are parallel
                     if (wall.isParallelTo(otherWall)) {
@@ -1268,10 +1311,35 @@
                             }
                         }
                     }
+                    // Rule 3b: Perpendicular walls have no minimum distance requirement
                 }
+                
+                // DIFFERENT FLOOR RULES (Rule 2)
+                else if (onAdjacentFloors) {
+                    // Check if walls are parallel and overlapping
+                    if (wall.isParallelTo(otherWall)) {
+                        const dist = wall.distanceToWall(otherWall);
+                        
+                        // If overlapping (aligned on same line)
+                        if (dist < 10 && wall.overlapsInProjection(otherWall)) {
+                            // Rule 2: Overlapping segments must share orientation and thickness
+                            if (!wall.sameOrientation(otherWall)) {
+                                violations.push({
+                                    type: 'error',
+                                    message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share orientation`
+                                });
+                            }
 
-                // Rule 3b: Perpendicular walls have no minimum distance requirement
-                // (no violation to add)
+                            if (wall.thickness !== otherWall.thickness) {
+                                violations.push({
+                                    type: 'error',
+                                    message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share thickness`
+                                });
+                            }
+                        }
+                    }
+                    // No distance restrictions between floors for non-overlapping walls
+                }
             });
 
             return violations;
@@ -1427,14 +1495,25 @@
                             const startRatio = i / numSegments;
                             const endRatio = (i + 1) / numSegments;
                             
-                            const segStart = {
+                            let segStart = {
                                 x: drawingWall.x + newWall.d.x * startRatio,
                                 y: drawingWall.y + newWall.d.y * startRatio
                             };
-                            const segEnd = {
+                            let segEnd = {
                                 x: drawingWall.x + newWall.d.x * endRatio,
                                 y: drawingWall.y + newWall.d.y * endRatio
                             };
+                            
+                            // Snap junction points to 100mm grid (columns must be on grid)
+                            // First and last points are already snapped (from user drawing)
+                            if (i > 0) {
+                                segStart.x = snapToGrid(segStart.x, GRID_SIZE_INTERNAL);
+                                segStart.y = snapToGrid(segStart.y, GRID_SIZE_INTERNAL);
+                            }
+                            if (i < numSegments - 1) {
+                                segEnd.x = snapToGrid(segEnd.x, GRID_SIZE_INTERNAL);
+                                segEnd.y = snapToGrid(segEnd.y, GRID_SIZE_INTERNAL);
+                            }
                             
                             wallSegments.push(new Wall(
                                 segStart.x, segStart.y,
