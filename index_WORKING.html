@@ -1053,21 +1053,21 @@
                         continue;
                     }
                     
-                    // Non-aligned parallel walls on same floor need minimum distance (Rule 3a)
-                    if (onSameFloor) {
-                        // Use dot product to determine minimum distance
-                        const dotProduct = newWall.n.x * existingWall.n.x + newWall.n.y * existingWall.n.y;
-                        
+                    // Non-aligned parallel walls on same floor OR adjacent floors need minimum distance (Rule 3)
+                    const floorDiff = Math.abs(newWall.floorId - existingWall.floorId);
+                    if (floorDiff <= 1) { // Same floor or adjacent floors (consecutive levels)
+                        // Determine minimum distance based on orientation
                         let minDist;
-                        // Check if walls have opposite normals
-                        if (dotProduct < -0.9) {
-                            // Walls are anti-parallel. Now check if internal faces are facing TOWARD each other
+                        if (newWall.oppositeOrientation(existingWall)) {
+                            // Opposite orientation: check if facing toward/away
                             const newWallMidX = (newWall.pointA.x + newWall.pointB.x) / 2;
                             const newWallMidY = (newWall.pointA.y + newWall.pointB.y) / 2;
+                            const existingWallMidX = (existingWall.pointA.x + existingWall.pointB.x) / 2;
+                            const existingWallMidY = (existingWall.pointA.y + existingWall.pointB.y) / 2;
                             
                             const toNewWall = {
-                                x: newWallMidX - existingWall.pointA.x,
-                                y: newWallMidY - existingWall.pointA.y
+                                x: newWallMidX - existingWallMidX,
+                                y: newWallMidY - existingWallMidY
                             };
                             
                             const existingToNew = toNewWall.x * existingWall.n.x + toNewWall.y * existingWall.n.y;
@@ -1080,7 +1080,7 @@
                                 minDist = MIN_DISTANCE_PARALLEL;
                             }
                         } else {
-                            // Same orientation or not truly anti-parallel: 600mm
+                            // Same orientation: 600mm
                             minDist = MIN_DISTANCE_PARALLEL;
                         }
 
@@ -1093,7 +1093,6 @@
                             };
                         }
                     }
-                    // Different floors: no distance restriction (Rule 2 allows overlapping)
                 }
             }
             return { restricted: false };
@@ -1286,9 +1285,10 @@
                     walls.forEach((existingWall, idx) => {
                         console.log(`Wall ${idx}: ${existingWall.pointA.x},${existingWall.pointA.y} to ${existingWall.pointB.x},${existingWall.pointB.y}`);
                         
-                        // Only check walls on the same floor
-                        if (existingWall.floorId !== currentFloorId) {
-                            console.log('  -> Skip: different floor');
+                        // Check walls on current floor and adjacent floors (consecutive levels)
+                        const floorDiff = Math.abs(existingWall.floorId - currentFloorId);
+                        if (floorDiff > 1) {
+                            console.log('  -> Skip: not on current or adjacent floor');
                             return;
                         }
                         
@@ -1839,31 +1839,74 @@
                     // Rule 3b: Perpendicular walls have no minimum distance requirement
                 }
                 
-                // DIFFERENT LEVEL RULES (Rule 2)
+                // DIFFERENT LEVEL RULES (Rule 2 & Rule 3 across levels)
                 else if (onAdjacentFloors) {
-                    // Check if walls are parallel and overlapping
+                    // Check if walls are parallel
                     if (wall.isParallelTo(otherWall)) {
                         const dist = wall.distanceToWall(otherWall);
                         
                         // If overlapping (aligned on same line)
-                        if (dist < 10 && wall.overlapsInProjection(otherWall)) {
-                            // Rule 2: Overlapping segments must share orientation and thickness
-                            if (!wall.sameOrientation(otherWall)) {
-                                violations.push({
-                                    type: 'error',
-                                    message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share orientation`
-                                });
+                        if (dist < 10) {
+                            if (wall.overlapsInProjection(otherWall)) {
+                                // Rule 2: Overlapping segments must share orientation and thickness
+                                if (!wall.sameOrientation(otherWall)) {
+                                    violations.push({
+                                        type: 'error',
+                                        message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share orientation`
+                                    });
+                                }
+
+                                if (wall.thickness !== otherWall.thickness) {
+                                    violations.push({
+                                        type: 'error',
+                                        message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share thickness`
+                                    });
+                                }
+                            }
+                        } else {
+                            // Rule 3: Distance restrictions apply across consecutive floors too
+                            let minDist;
+                            if (wall.oppositeOrientation(otherWall)) {
+                                // Opposite orientation: check if facing toward/away
+                                const wall1Mid = {
+                                    x: (wall.pointA.x + wall.pointB.x) / 2,
+                                    y: (wall.pointA.y + wall.pointB.y) / 2
+                                };
+                                const wall2Mid = {
+                                    x: (otherWall.pointA.x + otherWall.pointB.x) / 2,
+                                    y: (otherWall.pointA.y + otherWall.pointB.y) / 2
+                                };
+                                
+                                const toOther = {
+                                    x: wall2Mid.x - wall1Mid.x,
+                                    y: wall2Mid.y - wall1Mid.y
+                                };
+                                
+                                const dot1 = wall.n.x * toOther.x + wall.n.y * toOther.y;
+                                
+                                if (dot1 > 0) {
+                                    minDist = MIN_DISTANCE_OPPOSITE; // 1200mm
+                                } else {
+                                    minDist = MIN_DISTANCE_PARALLEL; // 600mm
+                                }
+                            } else {
+                                // Same orientation: 600mm
+                                minDist = MIN_DISTANCE_PARALLEL;
                             }
 
-                            if (wall.thickness !== otherWall.thickness) {
+                            // Add 2mm tolerance
+                            console.log(`VALIDATE (cross-level): Wall ${wallIndex} to Wall ${otherIndex}: dist=${dist.toFixed(1)}mm, minDist=${minDist}mm, threshold=${minDist-2}mm`);
+                            if (dist < minDist - 2) {
+                                console.log(`  -> VIOLATION: ${dist.toFixed(1)} < ${minDist - 2}`);
                                 violations.push({
                                     type: 'error',
-                                    message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share thickness`
+                                    message: `Too close to Wall ${otherIndex + 1} on adjacent floor (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm`
                                 });
+                            } else {
+                                console.log(`  -> OK: ${dist.toFixed(1)} >= ${minDist - 2}`);
                             }
                         }
                     }
-                    // No distance restrictions between floors for non-overlapping walls
                 }
             });
 
@@ -2391,19 +2434,23 @@
                 </div>
 
                 <div class="rule-section">
-                    <h3>5. Minimum Distances (Same Level Only)</h3>
+                    <h3>5. Minimum Distances (Same and Adjacent Levels)</h3>
                     <ul>
                         <li><strong>Parallel Walls (Same Orientation):</strong> Minimum 60 cm distance (measured from blue line to blue line)</li>
-                        <li><strong>Parallel Walls (Opposite Orientation):</strong> Minimum 120 cm distance (measured from blue line to blue line)</li>
+                        <li><strong>Parallel Walls (Opposite Orientation, Facing Toward):</strong> Minimum 120 cm distance (measured from blue line to blue line)</li>
+                        <li><strong>Parallel Walls (Opposite Orientation, Facing Away):</strong> Minimum 60 cm distance</li>
                         <li><strong>Perpendicular Walls:</strong> No distance restrictions</li>
                         <li><strong>Aligned Walls:</strong> Distance rules do not apply (can be adjacent or have gaps)</li>
+                        <li><strong>Cross-Level:</strong> These distance rules apply between consecutive levels (e.g., Level 1 and Level 2)</li>
                     </ul>
                 </div>
 
                 <div class="rule-section">
                     <h3>6. Visual Feedback</h3>
                     <ul>
-                        <li><strong>Restricted Zones:</strong> Orange (60 cm) and red (120 cm) zones show where new walls cannot be placed</li>
+                        <li><strong>Restricted Zones:</strong> Red zones appear when drawing a wall that would violate distance rules</li>
+                        <li><strong>Zone Size:</strong> 60 cm or 120 cm depending on wall orientation relationship</li>
+                        <li><strong>Cross-Level Zones:</strong> Restriction zones from adjacent levels are also shown</li>
                         <li><strong>Preview Colors:</strong> Green preview indicates valid placement, red preview indicates rule violation</li>
                         <li><strong>Validation:</strong> Real-time validation with detailed error messages</li>
                     </ul>
