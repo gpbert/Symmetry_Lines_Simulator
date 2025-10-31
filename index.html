@@ -408,45 +408,45 @@
         /* Toast Messages */
         #toast-container {
             position: fixed;
-            top: 20px;
-            right: 20px;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 10000;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 12px;
             pointer-events: none;
+            align-items: center;
         }
 
         .toast {
-            background: linear-gradient(135deg, #ffffff 0%, #f8f8f8 100%);
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 16px 20px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05);
-            min-width: 300px;
-            max-width: 400px;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 14px 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
             pointer-events: auto;
-            animation: slideIn 0.3s ease-out;
+            animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
             display: flex;
-            align-items: flex-start;
-            gap: 12px;
+            align-items: center;
+            justify-content: center;
         }
 
         .toast.error {
-            border-left: 4px solid #f44336;
+            background: rgba(239, 68, 68, 0.95);
         }
 
         .toast.warning {
-            border-left: 4px solid #ff9800;
+            background: rgba(251, 146, 60, 0.95);
         }
 
         .toast.info {
-            border-left: 4px solid #2196f3;
+            background: rgba(59, 130, 246, 0.95);
         }
 
         .toast-icon {
-            font-size: 20px;
-            flex-shrink: 0;
+            display: none;
         }
 
         .toast-content {
@@ -454,36 +454,49 @@
         }
 
         .toast-message {
-            color: #2a2a2a;
-            font-size: 13px;
-            line-height: 1.5;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1.4;
             margin: 0;
+            text-align: center;
+            letter-spacing: 0.2px;
         }
 
-        @keyframes slideIn {
+        @keyframes fadeInUp {
             from {
-                transform: translateX(400px);
+                transform: translateY(20px);
                 opacity: 0;
             }
             to {
-                transform: translateX(0);
+                transform: translateY(0);
                 opacity: 1;
             }
         }
 
-        @keyframes slideOut {
+        @keyframes fadeOutDown {
             from {
-                transform: translateX(0);
+                transform: translateY(0);
                 opacity: 1;
             }
             to {
-                transform: translateX(400px);
+                transform: translateY(20px);
                 opacity: 0;
             }
         }
 
         .toast.hiding {
-            animation: slideOut 0.3s ease-in forwards;
+            animation: fadeOutDown 0.3s cubic-bezier(0.4, 0, 1, 1) forwards;
+        }
+        
+        /* Pulsing animation for restricting walls */
+        @keyframes wallPulse {
+            0%, 100% {
+                opacity: 0.3;
+            }
+            50% {
+                opacity: 0.6;
+            }
         }
     </style>
 </head>
@@ -1225,7 +1238,7 @@
                                 return {
                                     restricted: true,
                                     wall: existingWall,
-                                    zone: { distance: 1200, reason: 'Same-floor aligned walls must share orientation and thickness' }
+                                    zone: { distance: 600, reason: 'Same-floor aligned walls must share orientation and thickness' }
                                 };
                             }
                             // Also can't overlap
@@ -1477,6 +1490,9 @@
                 });
             }
             
+            // Track walls generating restriction zones (for pulsing effect while drawing)
+            const restrictingWalls = new Set();
+            
             // Get current level walls
             const currentFloorWalls = walls.filter(w => w.floorId === currentFloorId);
 
@@ -1550,10 +1566,14 @@
                                 console.log('  -> Skip: truly aligned (same line + same orientation)');
                                 return;
                             }
-                            // Same line but OPPOSITE orientation - INVALID! Always show zone
-                            console.log('  -> Same line + opposite orientation = ALWAYS INVALID');
-                            // This is always invalid, so show zone extending from the existing wall
-                            const requiredDistance = MIN_DISTANCE_OPPOSITE; // 1200mm for opposite orientation
+                            // Same line but OPPOSITE orientation - INVALID at 0mm!
+                            console.log('  -> Same line + opposite orientation = INVALID at 0mm');
+                            // When walls are on the same line with opposite orientation,
+                            // moving perpendicular creates "facing away" configuration = 600mm minimum
+                            const requiredDistance = MIN_DISTANCE_PARALLEL; // 600mm (internal faces point away)
+                            
+                            // Mark this wall as generating a restriction zone
+                            restrictingWalls.add(idx);
                             
                             ctx.fillStyle = 'rgba(244, 67, 54, 0.12)'; // Red
                             
@@ -1673,6 +1693,9 @@
                         if (actualDistance >= requiredDistance - 2) {
                             return; // Skip this wall - no violation risk
                         }
+                        
+                        // Mark this wall as generating a restriction zone
+                        restrictingWalls.add(idx);
                         
                         // All zones are RED
                         const zoneColor = 'rgba(244, 67, 54, 0.12)';
@@ -1887,6 +1910,37 @@
                 ctx.beginPath();
                 ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 12, 0, Math.PI * 2);
                 ctx.stroke();
+            }
+            
+            // Draw pulsing red overlay on walls generating restriction zones
+            if (drawingWall && restrictingWalls.size > 0) {
+                // Calculate pulse opacity using sine wave (0.3 to 0.6 range)
+                const time = Date.now() / 1000; // Convert to seconds
+                const pulseOpacity = 0.45 + Math.sin(time * 3) * 0.15; // 3 Hz frequency
+                
+                ctx.globalAlpha = pulseOpacity;
+                ctx.fillStyle = '#ef4444'; // Red color
+                
+                restrictingWalls.forEach(wallIdx => {
+                    const wall = walls[wallIdx];
+                    if (!wall) return;
+                    
+                    const external = wall.getExternalFacePoints();
+                    
+                    // Draw filled rectangle overlay
+                    ctx.beginPath();
+                    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
+                    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
+                    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
+                    ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
+                    ctx.closePath();
+                    ctx.fill();
+                });
+                
+                ctx.globalAlpha = 1.0;
+                
+                // Request animation frame to continue pulsing
+                requestAnimationFrame(draw);
             }
             
             // Show snap indicator when hovering and ready to start drawing
