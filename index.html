@@ -404,6 +404,87 @@
             margin-top: 6px;
             line-height: 1.5;
         }
+
+        /* Toast Messages */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f8f8 100%);
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05);
+            min-width: 300px;
+            max-width: 400px;
+            pointer-events: auto;
+            animation: slideIn 0.3s ease-out;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .toast.error {
+            border-left: 4px solid #f44336;
+        }
+
+        .toast.warning {
+            border-left: 4px solid #ff9800;
+        }
+
+        .toast.info {
+            border-left: 4px solid #2196f3;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-message {
+            color: #2a2a2a;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+
+        .toast.hiding {
+            animation: slideOut 0.3s ease-in forwards;
+        }
     </style>
 </head>
 <body>
@@ -449,7 +530,13 @@
             <div class="property-group" style="margin-top: 24px;">
                 <label class="checkbox-label">
                     <input type="checkbox" id="showOtherFloors" checked>
-                    Show Trace
+                    Show Levels Below
+                </label>
+            </div>
+            <div class="property-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="showLevelsAbove" checked>
+                    Show Levels Above
                 </label>
             </div>
         </div>
@@ -462,18 +549,6 @@
                     <option value="200">20 cm</option>
                     <option value="300">30 cm</option>
                 </select>
-            </div>
-            <div class="property-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showGrid" checked>
-                    Show Grid
-                </label>
-            </div>
-            <div class="property-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showRestrictedZones" checked>
-                    Show Restricted Zones
-                </label>
             </div>
         </div>
 
@@ -504,7 +579,6 @@
         const MM_TO_PX = 0.15; // Scale factor for visualization (1mm = 0.15px)
         const COLUMN_SIZE = 100; // mm - 10x10cm steel column
         const MIN_WALL_LENGTH = 400; // mm
-        const MAX_WALL_LENGTH = 6000; // mm
         const MIN_DISTANCE_PARALLEL = 600; // mm
         const MIN_DISTANCE_OPPOSITE = 1200; // mm
 
@@ -515,6 +589,10 @@
         let drawingWall = null;
         let tempPoint = null;
         let wallFlipped = false; // Track if wall is flipped during drawing
+        
+        // Undo history - stores operations (each operation can contain multiple walls)
+        let history = [];
+        const MAX_HISTORY = 50; // Keep last 50 operations
         
         // Level management
         let floors = [
@@ -527,6 +605,127 @@
         let zoomLevel = 1.0;
         let isPanning = false;
         let lastPanPos = { x: 0, y: 0 };
+        
+        // Move state
+        let isDragging = false;
+        let dragStartPos = null;
+        let originalWallPos = null;
+
+        // Toast notification system
+        function showToast(message, type = 'error', duration = 4000) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️';
+            
+            toast.innerHTML = `
+                <div class="toast-icon">${icon}</div>
+                <div class="toast-content">
+                    <p class="toast-message">${message}</p>
+                </div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Auto-remove after duration
+            setTimeout(() => {
+                toast.classList.add('hiding');
+                setTimeout(() => {
+                    container.removeChild(toast);
+                }, 300); // Match animation duration
+            }, duration);
+            
+            // Allow clicking to dismiss
+            toast.addEventListener('click', () => {
+                toast.classList.add('hiding');
+                setTimeout(() => {
+                    if (container.contains(toast)) {
+                        container.removeChild(toast);
+                    }
+                }, 300);
+            });
+        }
+
+        // Redo history
+        let redoHistory = [];
+
+        // Undo functionality
+        function undo() {
+            if (history.length === 0) {
+                showToast('Nothing to undo', 'info', 2000);
+                return;
+            }
+            
+            // Get the last operation
+            const lastOperation = history.pop();
+            
+            // Remove the walls from this operation
+            lastOperation.wallIndices.forEach(index => {
+                // Find and remove by comparing wall properties
+                // (indices may have shifted, so we match by wall object)
+                const wallIndex = walls.indexOf(lastOperation.walls[lastOperation.wallIndices.indexOf(index)]);
+                if (wallIndex !== -1) {
+                    walls.splice(wallIndex, 1);
+                }
+            });
+            
+            // Add to redo history
+            redoHistory.push(lastOperation);
+            if (redoHistory.length > MAX_HISTORY) {
+                redoHistory.shift();
+            }
+            
+            selectedWall = null;
+            updateUI();
+            draw();
+            
+            showToast('Undo', 'info', 2000);
+        }
+
+        // Redo functionality
+        function redo() {
+            if (redoHistory.length === 0) {
+                showToast('Nothing to redo', 'info', 2000);
+                return;
+            }
+            
+            // Get the last undone operation
+            const operation = redoHistory.pop();
+            
+            // Re-add the walls
+            operation.walls.forEach(wall => {
+                walls.push(wall);
+            });
+            
+            // Add back to undo history
+            addToHistory(operation.walls);
+            
+            selectedWall = null;
+            updateUI();
+            draw();
+            
+            showToast('Redo', 'info', 2000);
+        }
+
+        // Add walls to history
+        function addToHistory(addedWalls) {
+            const operation = {
+                walls: [...addedWalls],
+                wallIndices: addedWalls.map(w => walls.indexOf(w)),
+                timestamp: Date.now()
+            };
+            
+            history.push(operation);
+            
+            // Clear redo history when new action is performed
+            redoHistory = [];
+            
+            // Limit history size
+            if (history.length > MAX_HISTORY) {
+                history.shift();
+            }
+        }
 
         // Canvas variables
         let canvas, ctx;
@@ -821,8 +1020,7 @@
                 return;
             }
             
-            const showGridCheckbox = document.getElementById('showGrid');
-            if (showGridCheckbox && !showGridCheckbox.checked) return;
+            // Grid is always shown
             
             const gridStepExternal = mmToPx(GRID_SIZE_EXTERNAL);
             const gridStepInternal = mmToPx(GRID_SIZE_INTERNAL);
@@ -967,7 +1165,7 @@
         }
 
         function drawRestrictedZones() {
-            if (!document.getElementById('showRestrictedZones').checked) return;
+            // Restricted zones are always shown
             
             walls.forEach(wall => {
                 const zones = getRestrictedZones(wall);
@@ -1223,7 +1421,7 @@
             
             drawGrid();
 
-            // Draw walls from levels below (trace) if enabled
+            // Draw walls from levels below if enabled
             if (document.getElementById('showOtherFloors').checked) {
                 walls.forEach((wall, idx) => {
                     // Only show levels below the current level
@@ -1238,7 +1436,47 @@
                     }
                 });
             }
-
+            
+            // Draw walls from levels above if enabled (draw early so they don't get covered)
+            const showLevelsAboveCheckbox = document.getElementById('showLevelsAbove');
+            if (showLevelsAboveCheckbox && showLevelsAboveCheckbox.checked) {
+                walls.forEach((wall, idx) => {
+                    // Only show levels above the current level
+                    if (wall.floorId > currentFloorId) {
+                        // Calculate opacity based on distance from current level
+                        const floorsAbove = wall.floorId - currentFloorId;
+                        
+                        // Get wall faces
+                        const external = wall.getExternalFacePoints();
+                        
+                        // Draw filled rectangle with very faint light grey
+                        // Use much lower opacity for fill (0.15 for 1 level above)
+                        const fillOpacity = Math.max(0.08, 0.15 - (floorsAbove * 0.04));
+                        ctx.globalAlpha = fillOpacity;
+                        ctx.fillStyle = '#B0BEC5'; // Light blue-grey fill
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
+                        ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
+                        ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
+                        ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        // Draw dashed outline with higher opacity for visibility
+                        const outlineOpacity = Math.max(0.2, 0.4 - (floorsAbove * 0.1));
+                        ctx.globalAlpha = outlineOpacity;
+                        ctx.strokeStyle = '#607D8B'; // Darker blue-grey outline
+                        ctx.lineWidth = 2 / zoomLevel;
+                        ctx.setLineDash([8 / zoomLevel, 8 / zoomLevel]);
+                        ctx.stroke();
+                        
+                        ctx.setLineDash([]);
+                        ctx.globalAlpha = 1.0;
+                    }
+                });
+            }
+            
             // Get current level walls
             const currentFloorWalls = walls.filter(w => w.floorId === currentFloorId);
 
@@ -1281,7 +1519,7 @@
                 );
                 
                 // Draw dynamic restriction zones based on preview wall's orientation
-                if (document.getElementById('showRestrictedZones').checked && tempWall.length > 0) {
+                if (tempWall.length > 0) {
                     walls.forEach((existingWall, idx) => {
                         console.log(`Wall ${idx}: ${existingWall.pointA.x},${existingWall.pointA.y} to ${existingWall.pointB.x},${existingWall.pointB.y}`);
                         
@@ -1515,63 +1753,13 @@
                     });
                 }
                 
-                // Calculate wall segments if longer than MAX_WALL_LENGTH
-                const wallSegments = [];
-                if (tempWall.length > MAX_WALL_LENGTH) {
-                    const numSegments = Math.ceil(tempWall.length / MAX_WALL_LENGTH);
-                    const groupId = Date.now() + Math.random(); // Unique ID for preview segments
-                    
-                    for (let i = 0; i < numSegments; i++) {
-                        const startRatio = i / numSegments;
-                        const endRatio = (i + 1) / numSegments;
-                        
-                        let segStart = {
-                            x: tempWall.pointA.x + tempWall.d.x * startRatio,
-                            y: tempWall.pointA.y + tempWall.d.y * startRatio
-                        };
-                        let segEnd = {
-                            x: tempWall.pointA.x + tempWall.d.x * endRatio,
-                            y: tempWall.pointA.y + tempWall.d.y * endRatio
-                        };
-                        
-                        // Snap junction points to 100mm grid (columns must be on grid)
-                        // First and last points are already snapped (from user drawing)
-                        if (i > 0) {
-                            segStart.x = snapToGrid(segStart.x, GRID_SIZE_INTERNAL);
-                            segStart.y = snapToGrid(segStart.y, GRID_SIZE_INTERNAL);
-                        }
-                        if (i < numSegments - 1) {
-                            segEnd.x = snapToGrid(segEnd.x, GRID_SIZE_INTERNAL);
-                            segEnd.y = snapToGrid(segEnd.y, GRID_SIZE_INTERNAL);
-                        }
-                        
-                        wallSegments.push(new Wall(
-                            segStart.x, segStart.y,
-                            segEnd.x, segEnd.y,
-                            tempWall.thickness,
-                            tempWall.height,
-                            groupId, // Assign the same groupId to all preview segments
-                            currentFloorId // Preview on current floor
-                        ));
-                    }
-                } else {
-                    wallSegments.push(tempWall);
-                }
+                // Check if wall is in restricted zone
+                const restriction = isWallInRestrictedZone(tempWall);
+                const isRestricted = restriction.restricted;
                 
-                // Check if any segment is in restricted zone
-                let isRestricted = false;
-                let restriction = { restricted: false };
-                for (let segment of wallSegments) {
-                    const segRestriction = isWallInRestrictedZone(segment);
-                    if (segRestriction.restricted) {
-                        isRestricted = true;
-                        restriction = segRestriction;
-                        break;
-                    }
-                }
-                
-                // Draw each segment
-                wallSegments.forEach((segment, idx) => {
+                // Draw the preview wall
+                {
+                    const segment = tempWall;
                     const external = segment.getExternalFacePoints();
                 
                     // Draw full wall preview (semi-transparent)
@@ -1636,25 +1824,7 @@
                         columnSize
                     );
 
-                    // Draw segment split markers if multiple segments
-                    if (wallSegments.length > 1 && idx < wallSegments.length - 1) {
-                        ctx.strokeStyle = '#FF9800';
-                        ctx.lineWidth = 3;
-                        ctx.setLineDash([]);
-                        const splitX = segment.pointB.x;
-                        const splitY = segment.pointB.y;
-                        
-                        // Draw a small perpendicular line at the split
-                        const perpLen = 20;
-                        const perpX = -segment.dNorm.y * perpLen;
-                        const perpY = segment.dNorm.x * perpLen;
-                        
-                        ctx.beginPath();
-                        ctx.moveTo(mmToPx(splitX - perpX), mmToPx(splitY - perpY));
-                        ctx.lineTo(mmToPx(splitX + perpX), mmToPx(splitY + perpY));
-                        ctx.stroke();
-                    }
-                });
+                }
 
                 // Draw start and end points
                 ctx.fillStyle = isRestricted ? '#f44336' : '#4CAF50';
@@ -1734,13 +1904,6 @@
                 violations.push({
                     type: 'error',
                     message: `Wall is too short (${Math.round(wall.length / 10)}cm). Minimum: ${MIN_WALL_LENGTH / 10}cm`
-                });
-            }
-
-            if (wall.length > MAX_WALL_LENGTH) {
-                violations.push({
-                    type: 'error',
-                    message: `Wall is too long (${Math.round(wall.length / 10)}cm). Maximum: ${MAX_WALL_LENGTH / 10}cm`
                 });
             }
 
@@ -2026,6 +2189,15 @@
                 isPanning = false;
                 canvas.style.cursor = currentMode === 'draw' ? 'crosshair' : 'pointer';
             }
+            
+            if (isDragging) {
+                isDragging = false;
+                canvas.style.cursor = 'pointer';
+                dragStartPos = null;
+                originalWallPos = null;
+                validateAllWalls();
+                draw();
+            }
         });
         
         canvas.addEventListener('mousemove', (e) => {
@@ -2041,6 +2213,26 @@
             
             const pos = getMousePosition(e);
             currentMousePos = pos;
+
+            if (currentMode === 'select' && isDragging && selectedWall) {
+                // Calculate offset from drag start
+                const offsetX = pos.x - dragStartPos.x;
+                const offsetY = pos.y - dragStartPos.y;
+                
+                // Snap offset to grid
+                const snappedOffsetX = snapToGrid(offsetX, GRID_SIZE_EXTERNAL);
+                const snappedOffsetY = snapToGrid(offsetY, GRID_SIZE_EXTERNAL);
+                
+                // Update wall position
+                selectedWall.pointA.x = originalWallPos.ax + snappedOffsetX;
+                selectedWall.pointA.y = originalWallPos.ay + snappedOffsetY;
+                selectedWall.pointB.x = originalWallPos.bx + snappedOffsetX;
+                selectedWall.pointB.y = originalWallPos.by + snappedOffsetY;
+                selectedWall.updateVectors();
+                
+                draw();
+                return;
+            }
 
             if (currentMode === 'draw' && drawingWall) {
                 // Constrain to horizontal or vertical only
@@ -2063,6 +2255,14 @@
                 isPanning = false;
                 canvas.style.cursor = currentMode === 'draw' ? 'crosshair' : 'pointer';
             }
+            
+            if (isDragging) {
+                isDragging = false;
+                canvas.style.cursor = 'pointer';
+                dragStartPos = null;
+                originalWallPos = null;
+            }
+            
             currentMousePos = null;
             draw();
         });
@@ -2118,78 +2318,34 @@
                     );
 
                     if (newWall.length < MIN_WALL_LENGTH) {
-                        alert(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`);
+                        showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
                         drawingWall = null;
                         tempPoint = null;
                         draw();
                         return;
                     }
 
-                    // Calculate wall segments if longer than MAX_WALL_LENGTH
-                    const wallSegments = [];
-                    if (newWall.length > MAX_WALL_LENGTH) {
-                        const numSegments = Math.ceil(newWall.length / MAX_WALL_LENGTH);
-                        const groupId = Date.now() + Math.random(); // Unique ID for this wall group
-                        
-                        for (let i = 0; i < numSegments; i++) {
-                            const startRatio = i / numSegments;
-                            const endRatio = (i + 1) / numSegments;
-                            
-                            let segStart = {
-                                x: newWall.pointA.x + newWall.d.x * startRatio,
-                                y: newWall.pointA.y + newWall.d.y * startRatio
-                            };
-                            let segEnd = {
-                                x: newWall.pointA.x + newWall.d.x * endRatio,
-                                y: newWall.pointA.y + newWall.d.y * endRatio
-                            };
-                            
-                            // Snap junction points to 100mm grid (columns must be on grid)
-                            // First and last points are already snapped (from user drawing)
-                            if (i > 0) {
-                                segStart.x = snapToGrid(segStart.x, GRID_SIZE_INTERNAL);
-                                segStart.y = snapToGrid(segStart.y, GRID_SIZE_INTERNAL);
-                            }
-                            if (i < numSegments - 1) {
-                                segEnd.x = snapToGrid(segEnd.x, GRID_SIZE_INTERNAL);
-                                segEnd.y = snapToGrid(segEnd.y, GRID_SIZE_INTERNAL);
-                            }
-                            
-                            wallSegments.push(new Wall(
-                                segStart.x, segStart.y,
-                                segEnd.x, segEnd.y,
-                                thickness,
-                                height,
-                                groupId, // Assign the same groupId to all segments
-                                currentFloorId // Assign to current floor
-                            ));
+                    // Check if wall is in restricted zone
+                    const restriction = isWallInRestrictedZone(newWall);
+                    if (restriction.restricted) {
+                        let message = 'Cannot place wall here.';
+                        if (restriction.zone.reason) {
+                            message += ` ${restriction.zone.reason}`;
+                        } else if (restriction.zone.distance) {
+                            message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
                         }
-                    } else {
-                        wallSegments.push(newWall);
+                        showToast(message, 'error');
+                        drawingWall = null;
+                        tempPoint = null;
+                        draw();
+                        return;
                     }
 
-                    // Check if any segment is in restricted zone
-                    for (let segment of wallSegments) {
-                        const restriction = isWallInRestrictedZone(segment);
-                        if (restriction.restricted) {
-                            let message = 'Cannot place wall here.';
-                            if (restriction.zone.reason) {
-                                message += `\n${restriction.zone.reason}`;
-                            } else if (restriction.zone.distance) {
-                                message += `\nToo close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
-                            }
-                            alert(message);
-                            drawingWall = null;
-                            tempPoint = null;
-                            draw();
-                            return;
-                        }
-                    }
-
-                    // Add all segments to walls array
-                    wallSegments.forEach(segment => {
-                        walls.push(segment);
-                    });
+                    // Add wall to walls array
+                    walls.push(newWall);
+                    
+                    // Add to history for undo
+                    addToHistory([newWall]);
                     
                     drawingWall = null;
                     tempPoint = null;
@@ -2206,6 +2362,20 @@
                         break;
                     }
                 }
+                
+                // If a wall is selected, start dragging
+                if (selectedWall) {
+                    isDragging = true;
+                    dragStartPos = pos;
+                    originalWallPos = {
+                        ax: selectedWall.pointA.x,
+                        ay: selectedWall.pointA.y,
+                        bx: selectedWall.pointB.x,
+                        by: selectedWall.pointB.y
+                    };
+                    canvas.style.cursor = 'grabbing';
+                }
+                
                 updateUI();
                 draw();
             }
@@ -2247,12 +2417,47 @@
             }
         });
         
-        // Space key to flip wall during drawing
+        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            // Space key to flip wall during drawing
             if (e.code === 'Space' && drawingWall && tempPoint) {
                 e.preventDefault(); // Prevent page scroll
                 wallFlipped = !wallFlipped;
                 draw();
+            }
+            
+            // Escape key to cancel wall drawing
+            if (e.key === 'Escape' && drawingWall) {
+                e.preventDefault();
+                drawingWall = null;
+                tempPoint = null;
+                wallFlipped = false;
+                draw();
+            }
+            
+            // Ctrl+Z or Cmd+Z for undo
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault(); // Prevent browser undo
+                undo();
+            }
+            
+            // Ctrl+Shift+Z or Cmd+Shift+Z or Ctrl+Y for redo
+            if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key === 'z' || e.key === 'y')) {
+                e.preventDefault(); // Prevent browser redo
+                redo();
+            }
+            
+            // Delete or Backspace to delete selected wall
+            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedWall && currentMode === 'select') {
+                e.preventDefault(); // Prevent browser back navigation on Backspace
+                const wallIndex = walls.indexOf(selectedWall);
+                if (wallIndex !== -1) {
+                    walls.splice(wallIndex, 1);
+                    selectedWall = null;
+                    updateUI();
+                    validateAllWalls();
+                    showToast('Wall deleted', 'info', 2000);
+                }
             }
         });
 
@@ -2262,6 +2467,8 @@
                 selectedWall = null;
                 drawingWall = null;
                 tempPoint = null;
+                history = []; // Clear undo history
+                redoHistory = []; // Clear redo history
                 updateUI();
                 draw();
             }
@@ -2287,8 +2494,8 @@
             }
         });
 
-        document.getElementById('showGrid').addEventListener('change', draw);
-        document.getElementById('showRestrictedZones').addEventListener('change', draw);
+        document.getElementById('showOtherFloors').addEventListener('change', draw);
+        document.getElementById('showLevelsAbove').addEventListener('change', draw);
 
         document.getElementById('wallThickness').addEventListener('change', () => {
             if (selectedWall) {
@@ -2387,6 +2594,9 @@
     </script>
 
     <!-- Rules Modal -->
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
     <div id="rulesModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -2400,7 +2610,6 @@
                     <h3>1. Wall Dimensions</h3>
                     <ul>
                         <li><strong>Minimum Length:</strong> 40 cm from the 2 faces of the wall</li>
-                        <li><strong>Maximum Length:</strong> 600 cm (walls longer than this are automatically split into segments)</li>
                         <li><strong>Thickness Options:</strong> 20 cm or 30 cm</li>
                     </ul>
                 </div>
