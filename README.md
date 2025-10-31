@@ -102,7 +102,6 @@ A web-based application for simulating and validating wall placement according t
 ## Files
 
 - `index.html`: Main application file (complete standalone web app)
-- `Table of Rules.pdf`: Reference document with detailed structural rules
 - `rules.txt`: Extracted text version of the rules
 
 ## Browser Compatibility

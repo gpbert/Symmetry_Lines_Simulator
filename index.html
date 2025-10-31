@@ -798,8 +798,6 @@
         
         // Initialize everything when DOM is ready
         window.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded, initializing...');
-            
             canvas = document.getElementById('mainCanvas');
             if (!canvas) {
                 console.error('Canvas element not found!');
@@ -807,13 +805,11 @@
             }
             
             ctx = canvas.getContext('2d');
-            console.log('Canvas and context initialized');
             
             function resizeCanvas() {
                 const container = canvas.parentElement;
                 canvas.width = container.clientWidth;
                 canvas.height = container.clientHeight;
-                console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
                 if (canvas.width > 0 && canvas.height > 0) {
                     draw();
                 } else {
@@ -972,16 +968,6 @@
                     
                     const crossProduct = Math.abs(dx * (py - y0) - dy * (px - x0));
                     const distance = crossProduct / len;
-                    
-                    console.log('DISTANCE CALC:', {
-                        wall1_internal: {x: px, y: py},
-                        wall2_internal: {x: x0, y: y0},
-                        direction: {dx, dy},
-                        crossProduct,
-                        len,
-                        distance: distance.toFixed(1)
-                    });
-                    
                     return distance;
                 }
                 
@@ -1468,14 +1454,10 @@
         }
 
         function draw() {
-            console.log('draw() called');
-            
             if (!ctx || !canvas) {
                 console.error('Canvas not initialized in draw!');
                 return;
             }
-            
-            console.log('Drawing on canvas:', canvas.width, 'x', canvas.height);
             
             // Clear and fill background (before transformation)
             ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
@@ -1590,18 +1572,14 @@
                 // Draw dynamic restriction zones based on preview wall's orientation
                 if (tempWall.length > 0) {
                     walls.forEach((existingWall, idx) => {
-                        console.log(`Wall ${idx}: ${existingWall.pointA.x},${existingWall.pointA.y} to ${existingWall.pointB.x},${existingWall.pointB.y}`);
-                        
                         // Check walls on current floor and adjacent floors (consecutive levels)
                         const floorDiff = Math.abs(existingWall.floorId - currentFloorId);
                         if (floorDiff > 1) {
-                            console.log('  -> Skip: not on current or adjacent floor');
                             return;
                         }
                         
                         // Only draw zones for parallel walls
                         const isParallel = existingWall.isParallelTo(tempWall);
-                        console.log('  -> Parallel:', isParallel);
                         if (!isParallel) return;
                         
                         // Calculate preview midpoint (used for both special case and general case)
@@ -1610,17 +1588,13 @@
                         
                         // Check if walls are aligned (same line AND same orientation)
                         const dist = tempWall.distanceToWall(existingWall);
-                        console.log('  -> Distance:', dist.toFixed(1) + 'mm');
                         if (dist < 10) {
                             // On same line - check orientation
                             const sameOrientation = tempWall.sameOrientation(existingWall);
-                            console.log('  -> Same orientation:', sameOrientation);
                             if (sameOrientation) {
-                                console.log('  -> Skip: truly aligned (same line + same orientation)');
                                 return;
                             }
                             // Same line but OPPOSITE orientation - INVALID at 0mm!
-                            console.log('  -> Same line + opposite orientation = INVALID at 0mm');
                             // When walls are on the same line with opposite orientation,
                             // moving perpendicular creates "facing away" configuration = 600mm minimum
                             const requiredDistance = MIN_DISTANCE_PARALLEL; // 600mm (internal faces point away)
@@ -2060,15 +2034,11 @@
                             }
 
                             // Add 2mm tolerance to avoid floating-point precision issues
-                            console.log(`VALIDATE: Wall ${wallIndex} to Wall ${otherIndex}: dist=${dist.toFixed(1)}mm, minDist=${minDist}mm, threshold=${minDist-2}mm`);
                             if (dist < minDist - 2) {
-                                console.log(`  -> VIOLATION: ${dist.toFixed(1)} < ${minDist - 2}`);
                                 violations.push({
                                     type: 'error',
                                     message: `Too close to Wall ${otherIndex + 1} (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm`
                                 });
-                            } else {
-                                console.log(`  -> OK: ${dist.toFixed(1)} >= ${minDist - 2}`);
                             }
                         }
                     }
@@ -2131,15 +2101,11 @@
                             }
 
                             // Add 2mm tolerance
-                            console.log(`VALIDATE (cross-level): Wall ${wallIndex} to Wall ${otherIndex}: dist=${dist.toFixed(1)}mm, minDist=${minDist}mm, threshold=${minDist-2}mm`);
                             if (dist < minDist - 2) {
-                                console.log(`  -> VIOLATION: ${dist.toFixed(1)} < ${minDist - 2}`);
                                 violations.push({
                                     type: 'error',
                                     message: `Too close to Wall ${otherIndex + 1} on adjacent floor (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm`
                                 });
-                            } else {
-                                console.log(`  -> OK: ${dist.toFixed(1)} >= ${minDist - 2}`);
                             }
                         }
                     }
