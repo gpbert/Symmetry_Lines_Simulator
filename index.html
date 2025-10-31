@@ -602,6 +602,7 @@
         let drawingWall = null;
         let tempPoint = null;
         let wallFlipped = false; // Track if wall is flipped during drawing
+        let drawingToastElement = null; // Track the current drawing toast
         
         // Undo history - stores operations (each operation can contain multiple walls)
         let history = [];
@@ -658,6 +659,58 @@
                     }
                 }, 300);
             });
+        }
+        
+        // Update or create a persistent toast while drawing (errors only)
+        function updateDrawingToast(isRestricted, restriction, wallLength) {
+            const container = document.getElementById('toast-container');
+            
+            if (isRestricted) {
+                // Show error toast
+                const message = `Cannot place here. Min distance: ${restriction.zone.distance / 10}cm`;
+                const type = 'error';
+                
+                // If toast exists, update it
+                if (drawingToastElement && container.contains(drawingToastElement)) {
+                    drawingToastElement.className = `toast ${type}`;
+                    const messageEl = drawingToastElement.querySelector('.toast-message');
+                    if (messageEl) {
+                        messageEl.textContent = message;
+                    }
+                } else {
+                    // Create new toast
+                    const toast = document.createElement('div');
+                    toast.className = `toast ${type}`;
+                    
+                    toast.innerHTML = `
+                        <div class="toast-icon">❌</div>
+                        <div class="toast-content">
+                            <p class="toast-message">${message}</p>
+                        </div>
+                    `;
+                    
+                    container.appendChild(toast);
+                    drawingToastElement = toast;
+                }
+            } else {
+                // Valid wall - clear any existing error toast
+                clearDrawingToast();
+            }
+        }
+        
+        // Clear the drawing toast
+        function clearDrawingToast() {
+            if (drawingToastElement) {
+                const container = document.getElementById('toast-container');
+                drawingToastElement.classList.add('hiding');
+                const toastToRemove = drawingToastElement;
+                drawingToastElement = null;
+                setTimeout(() => {
+                    if (container.contains(toastToRemove)) {
+                        container.removeChild(toastToRemove);
+                    }
+                }, 300);
+            }
         }
 
         // Redo history
@@ -1859,42 +1912,8 @@
                 ctx.arc(mmToPx(tempPoint.x), mmToPx(tempPoint.y), 6, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Show info text
-                const midX = (drawingWall.x + tempPoint.x) / 2;
-                const midY = (drawingWall.y + tempPoint.y) / 2;
-                
-                ctx.fillStyle = isRestricted ? '#f44336' : '#4CAF50';
-                ctx.font = 'bold 14px sans-serif';
-                ctx.textAlign = 'center';
-                
-                if (isRestricted) {
-                    ctx.fillText(
-                        '✗ Cannot place here',
-                        mmToPx(midX),
-                        mmToPx(midY) - 10
-                    );
-                    ctx.font = '12px sans-serif';
-                    ctx.fillText(
-                        `Min distance: ${restriction.zone.distance / 10}cm`,
-                        mmToPx(midX),
-                        mmToPx(midY) + 10
-                    );
-                } else {
-                    const totalLength = Math.round(tempWall.length / 10);
-                    if (wallSegments.length > 1) {
-                        ctx.fillText(
-                            `${totalLength}cm (${wallSegments.length} walls)`,
-                            mmToPx(midX),
-                            mmToPx(midY) - 10
-                        );
-                    } else {
-                        ctx.fillText(
-                            `${totalLength}cm`,
-                            mmToPx(midX),
-                            mmToPx(midY) - 10
-                        );
-                    }
-                }
+                // Update drawing toast with current status
+                updateDrawingToast(isRestricted, restriction, tempWall.length);
             }
 
             // Show starting point when first click is placed but no preview yet
@@ -2375,6 +2394,7 @@
                         showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
                         drawingWall = null;
                         tempPoint = null;
+                        clearDrawingToast();
                         draw();
                         return;
                     }
@@ -2391,6 +2411,7 @@
                         showToast(message, 'error');
                         drawingWall = null;
                         tempPoint = null;
+                        clearDrawingToast();
                         draw();
                         return;
                     }
@@ -2404,6 +2425,7 @@
                     drawingWall = null;
                     tempPoint = null;
                     wallFlipped = false; // Reset flip state
+                    clearDrawingToast();
                     updateUI();
                     validateAllWalls();
                 }
@@ -2441,6 +2463,7 @@
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+            clearDrawingToast();
             updateModeUI();
         });
 
@@ -2449,6 +2472,7 @@
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+            clearDrawingToast();
             updateModeUI();
         });
 
@@ -2486,6 +2510,7 @@
                 drawingWall = null;
                 tempPoint = null;
                 wallFlipped = false;
+                clearDrawingToast();
                 draw();
             }
             
