@@ -620,6 +620,12 @@
                     </svg>
                     Positional Rules
                 </button>
+                <button id="feedbackBtn" class="btn btn-secondary">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7 13C10.3137 13 13 10.3137 13 7C13 3.68629 10.3137 1 7 1C3.68629 1 1 3.68629 1 7C1 8.5 1.5 9.8 2.5 10.8L1.5 13L4 12C5 12.6 6 13 7 13Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Send Feedback
+                </button>
             </div>
         </div>
 
@@ -2630,6 +2636,77 @@
             if (e.target === rulesModal) {
                 rulesModal.classList.remove('show');
             }
+            if (e.target === feedbackModal) {
+                feedbackModal.classList.remove('show');
+            }
+        });
+        
+        // Feedback Modal
+        const feedbackModal = document.getElementById('feedbackModal');
+        const feedbackBtn = document.getElementById('feedbackBtn');
+        const feedbackModalClose = document.getElementById('feedbackModalClose');
+        const feedbackCancel = document.getElementById('feedbackCancel');
+        const feedbackForm = document.getElementById('feedbackForm');
+        const feedbackStatus = document.getElementById('feedbackStatus');
+        
+        feedbackBtn.addEventListener('click', () => {
+            feedbackModal.classList.add('show');
+        });
+        
+        feedbackModalClose.addEventListener('click', () => {
+            feedbackModal.classList.remove('show');
+        });
+        
+        feedbackCancel.addEventListener('click', () => {
+            feedbackModal.classList.remove('show');
+        });
+        
+        feedbackForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('feedbackSubmit');
+            const email = document.getElementById('feedbackEmail').value;
+            const message = document.getElementById('feedbackMessage').value;
+            
+            // Disable submit button
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending...';
+            
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, message })
+                });
+                
+                if (response.ok) {
+                    feedbackStatus.style.display = 'block';
+                    feedbackStatus.style.background = 'rgba(76, 175, 80, 0.1)';
+                    feedbackStatus.style.color = '#4CAF50';
+                    feedbackStatus.textContent = 'Thank you! Your feedback has been sent.';
+                    
+                    // Reset form
+                    feedbackForm.reset();
+                    
+                    // Close modal after 2 seconds
+                    setTimeout(() => {
+                        feedbackModal.classList.remove('show');
+                        feedbackStatus.style.display = 'none';
+                    }, 2000);
+                } else {
+                    throw new Error('Failed to send feedback');
+                }
+            } catch (error) {
+                feedbackStatus.style.display = 'block';
+                feedbackStatus.style.background = 'rgba(244, 67, 54, 0.1)';
+                feedbackStatus.style.color = '#f44336';
+                feedbackStatus.textContent = 'Oops! Something went wrong. Please try again.';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Send';
+            }
         });
 
         document.getElementById('showOtherFloors').addEventListener('change', draw);
@@ -2815,6 +2892,43 @@
                         <li><strong>Validation:</strong> Real-time validation with detailed error messages</li>
                     </ul>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedbackModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>
+                    <svg width="18" height="18" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -2px; margin-right: 6px;">
+                        <path d="M7 13C10.3137 13 13 10.3137 13 7C13 3.68629 10.3137 1 7 1C3.68629 1 1 3.68629 1 7C1 8.5 1.5 9.8 2.5 10.8L1.5 13L4 12C5 12.6 6 13 7 13Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Send Feedback
+                </h2>
+                <span class="modal-close" id="feedbackModalClose">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p class="modal-intro">Help us improve! Share your thoughts, report bugs, or request features.</p>
+                
+                <form id="feedbackForm" style="margin-top: 24px;">
+                    <div class="property-group">
+                        <label for="feedbackEmail" style="display: block; margin-bottom: 6px; font-weight: 500; color: #2a2a2a;">Email (optional)</label>
+                        <input type="email" id="feedbackEmail" placeholder="your@email.com" style="width: 100%; padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; font-family: 'Inter', sans-serif;">
+                    </div>
+                    
+                    <div class="property-group" style="margin-top: 16px;">
+                        <label for="feedbackMessage" style="display: block; margin-bottom: 6px; font-weight: 500; color: #2a2a2a;">Message</label>
+                        <textarea id="feedbackMessage" required placeholder="Tell us what you think..." rows="6" style="width: 100%; padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; font-family: 'Inter', sans-serif; resize: vertical;"></textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
+                        <button type="button" id="feedbackCancel" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" id="feedbackSubmit" class="btn btn-secondary" style="background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%); color: #ffffff; border-color: #1a1a1a;">Send</button>
+                    </div>
+                </form>
+                
+                <div id="feedbackStatus" style="display: none; margin-top: 16px; padding: 12px; border-radius: 8px; text-align: center;"></div>
             </div>
         </div>
     </div>

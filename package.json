@@ -1,0 +1,9 @@
+{
+  "name": "30cm-grid-simulator",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "resend": "^3.0.0"
+  }
+}
+
