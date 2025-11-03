@@ -1315,42 +1315,45 @@
                 // Check if parallel
                 if (existingWall.isParallelTo(newWall)) {
                     const dist = newWall.distanceToWall(existingWall);
+                    const sameOrientation = newWall.sameOrientation(existingWall);
+                    const sameThickness = Math.abs(newWall.thickness - existingWall.thickness) < 1;
+                    const hasOverlap = newWall.overlapsInProjection(existingWall);
                     
-                    // Aligned walls (on same line)
-                    if (dist < 10) {
-                        const sameOrientation = newWall.sameOrientation(existingWall);
-                        const sameThickness = Math.abs(newWall.thickness - existingWall.thickness) < 1;
-                        const hasOverlap = newWall.overlapsInProjection(existingWall);
-                        
-                        if (onSameFloor) {
-                            // Rule 1: Aligned walls on same floor must share orientation and thickness
-                            if (!sameOrientation || !sameThickness) {
-                                return {
-                                    restricted: true,
-                                    wall: existingWall,
-                                    zone: { distance: 600, reason: 'Same-floor aligned walls must share orientation and thickness' }
-                                };
-                            }
-                            // Also can't overlap
-                            if (hasOverlap) {
-                                return {
-                                    restricted: true,
-                                    wall: existingWall,
-                                    zone: { distance: 0, reason: 'Same-floor aligned walls cannot overlap' }
-                                };
-                            }
-                        } else if (hasOverlap) {
-                            // Rule 2: Cross-floor overlapping walls must share orientation and thickness
-                            if (!sameOrientation || !sameThickness) {
-                                return {
-                                    restricted: true,
-                                    wall: existingWall,
-                                    zone: { distance: 0, reason: 'Cross-floor overlap requires matching thickness and orientation' }
-                                };
-                            }
+                    // Check for body overlap (critical for cross-floor walls with opposite orientations)
+                    const maxBodyOverlapDist = newWall.thickness + existingWall.thickness + 10; // +10mm tolerance
+                    const bodiesOverlap = dist < maxBodyOverlapDist;
+                    
+                    // Same-floor: Check if aligned (internal faces close together)
+                    if (onSameFloor && dist < 10) {
+                        // Rule 1: Aligned walls on same floor must share orientation and thickness
+                        if (!sameOrientation || !sameThickness) {
+                            return {
+                                restricted: true,
+                                wall: existingWall,
+                                zone: { distance: 600, reason: 'Same-floor aligned walls must share orientation and thickness' }
+                            };
                         }
-                        
-                        // If we got here, the rules are satisfied
+                        // Also can't overlap
+                        if (hasOverlap) {
+                            return {
+                                restricted: true,
+                                wall: existingWall,
+                                zone: { distance: 0, reason: 'Same-floor aligned walls cannot overlap' }
+                            };
+                        }
+                        continue;
+                    }
+                    
+                    // Cross-floor: Check if bodies overlap (regardless of internal face distance)
+                    if (onDifferentFloor && hasOverlap && bodiesOverlap) {
+                        // Rule 2: Cross-floor overlapping walls must share orientation and thickness
+                        if (!sameOrientation || !sameThickness) {
+                            return {
+                                restricted: true,
+                                wall: existingWall,
+                                zone: { distance: 600, reason: 'Cross-floor overlap requires matching thickness and orientation' }
+                            };
+                        }
                         continue;
                     }
                     

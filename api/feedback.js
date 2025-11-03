@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   try {
     await resend.emails.send({
       from: 'Feedback <onboarding@resend.dev>', // Resend test domain - ready to use!
-      to: ['graham@zuru.com'], // All feedback goes here ✅
+      to: ['gpsiebert@gmail.com'], // Resend test domain requires this to be your signup email
       subject: '📝 New Feedback from 30cm Grid Simulator',
       html: `
         <div style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
