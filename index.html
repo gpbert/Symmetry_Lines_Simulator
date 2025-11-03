@@ -1344,6 +1344,12 @@
                         continue;
                     }
                     
+                    // Cross-floor: Check if on same gridline with matching orientation/thickness
+                    // These are always allowed, regardless of whether they overlap in projection
+                    if (onDifferentFloor && dist < 10 && sameOrientation && sameThickness) {
+                        continue; // Same gridline, same orientation/thickness - always valid
+                    }
+                    
                     // Cross-floor: Check if bodies overlap (regardless of internal face distance)
                     if (onDifferentFloor && hasOverlap && bodiesOverlap) {
                         // Rule 2: Cross-floor overlapping walls must share orientation and thickness
@@ -1354,8 +1360,12 @@
                                 zone: { distance: 600, reason: 'Cross-floor overlap requires matching thickness and orientation' }
                             };
                         }
-                        // If orientation and thickness match, still need to check minimum distance below
-                        // (Don't continue here - fall through to distance validation)
+                        // If orientation and thickness match AND walls are directly on top of each other, allow it
+                        if (dist < 10) {
+                            continue; // Directly overlapping - valid placement
+                        }
+                        // If they have matching orientation/thickness but aren't directly overlapping (e.g. 30cm apart),
+                        // fall through to check minimum distance requirements
                     }
                     
                     // Non-aligned parallel walls on same floor OR adjacent floors need minimum distance (Rule 3)
