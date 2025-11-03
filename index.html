@@ -1354,7 +1354,8 @@
                                 zone: { distance: 600, reason: 'Cross-floor overlap requires matching thickness and orientation' }
                             };
                         }
-                        continue;
+                        // If orientation and thickness match, still need to check minimum distance below
+                        // (Don't continue here - fall through to distance validation)
                     }
                     
                     // Non-aligned parallel walls on same floor OR adjacent floors need minimum distance (Rule 3)
