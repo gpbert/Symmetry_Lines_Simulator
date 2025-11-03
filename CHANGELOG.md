@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.0] - 2025-11-03
+
+### Added
+- **Wall stretching**: Click and drag wall endpoints in Select mode to resize walls
+  - Visual endpoint handles appear when hovering over walls
+  - Constrained to wall's axis (horizontal stays horizontal, vertical stays vertical)
+  - Snaps to 300mm grid
+  - Real-time validation during stretching
+  - Minimum length (400mm) enforced
+  - Undo/redo support
+  - Automatically restores original position if invalid
+
+---
+
 ## [1.0.0] - 2025-11-03
 
 ### Added
@@ -38,12 +52,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Toast notifications for placement errors
 - **Positional rules modal**: View the complete list of rules being enforced in the simulator
 - **Feedback system**: Send feedback directly from the app via integrated form
-- **Apple-style UI**: 
-  - Minimal, neutral design inspired by rayon.design
-  - Custom SVG icons
-  - Smooth micro-animations
-  - Professional typography (Inter/system fonts)
-  - Soft shadows and rounded corners
 
 ### Rules Enforced
 1. **Same-floor aligned walls**: Must share orientation and thickness; cannot overlap

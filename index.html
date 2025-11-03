@@ -629,7 +629,7 @@
                 
                 <div id="versionBadge" style="margin-top: 16px; padding: 12px; background: rgba(0, 0, 0, 0.02); border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 8px; cursor: pointer; transition: all 0.2s ease; text-align: center;">
                     <div style="font-size: 11px; color: #9b9b9b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Version</div>
-                    <div style="font-size: 14px; font-weight: 500; color: #2a2a2a;">1.0.0</div>
+                    <div style="font-size: 14px; font-weight: 500; color: #2a2a2a;">1.1.0</div>
                 </div>
             </div>
         </div>
@@ -681,6 +681,11 @@
         let isDragging = false;
         let dragStartPos = null;
         let originalWallPos = null;
+        
+        // Wall stretching state
+        let stretchingWall = null;
+        let stretchingEndpoint = null; // 'A' or 'B'
+        let originalStretchPoint = null;
 
         // Toast notification system
         function showToast(message, type = 'error', duration = 4000) {
@@ -1523,6 +1528,36 @@
             ctx.globalAlpha = 1.0;
         }
 
+        // Helper function to check if a point is near a wall endpoint
+        function getEndpointNearPoint(x, y, threshold = 20) {
+            // Transform threshold to world coordinates
+            const worldThreshold = threshold / zoomLevel;
+            
+            for (let wall of walls) {
+                // Only check walls on current floor
+                if (wall.floorId !== currentFloorId) continue;
+                
+                // Check point A
+                const distA = Math.sqrt(
+                    Math.pow(x - wall.pointA.x, 2) + 
+                    Math.pow(y - wall.pointA.y, 2)
+                );
+                if (distA < worldThreshold) {
+                    return { wall, endpoint: 'A' };
+                }
+                
+                // Check point B
+                const distB = Math.sqrt(
+                    Math.pow(x - wall.pointB.x, 2) + 
+                    Math.pow(y - wall.pointB.y, 2)
+                );
+                if (distB < worldThreshold) {
+                    return { wall, endpoint: 'B' };
+                }
+            }
+            return null;
+        }
+        
         function draw() {
             if (!ctx || !canvas) {
                 console.error('Canvas not initialized in draw!');
@@ -1619,6 +1654,52 @@
                     drawWall(wall, isSelected, violations);
                 }
             });
+            
+            // Draw endpoint handles in select mode (only for selected walls)
+            if (currentMode === 'select' && selectedWalls.length > 0) {
+                selectedWalls.forEach((wall) => {
+                    if (wall.floorId === currentFloorId) {
+                        ctx.save();
+                        
+                        // Check if mouse is near endpoints for hover highlighting
+                        let nearA = false;
+                        let nearB = false;
+                        if (currentMousePos) {
+                            const worldThreshold = 20 / zoomLevel;
+                            const distA = Math.sqrt(
+                                Math.pow(currentMousePos.x - wall.pointA.x, 2) + 
+                                Math.pow(currentMousePos.y - wall.pointA.y, 2)
+                            );
+                            const distB = Math.sqrt(
+                                Math.pow(currentMousePos.x - wall.pointB.x, 2) + 
+                                Math.pow(currentMousePos.y - wall.pointB.y, 2)
+                            );
+                            nearA = distA < worldThreshold;
+                            nearB = distB < worldThreshold;
+                        }
+                        
+                        // Draw point A handle
+                        ctx.beginPath();
+                        ctx.arc(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y), 8 / zoomLevel, 0, Math.PI * 2);
+                        ctx.fillStyle = nearA ? '#2563eb' : 'rgba(37, 99, 235, 0.5)';
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2 / zoomLevel;
+                        ctx.stroke();
+                        
+                        // Draw point B handle
+                        ctx.beginPath();
+                        ctx.arc(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y), 8 / zoomLevel, 0, Math.PI * 2);
+                        ctx.fillStyle = nearB ? '#2563eb' : 'rgba(37, 99, 235, 0.5)';
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2 / zoomLevel;
+                        ctx.stroke();
+                        
+                        ctx.restore();
+                    }
+                });
+            }
 
             // Draw temporary wall while drawing
             if (drawingWall && tempPoint && (drawingWall.x !== tempPoint.x || drawingWall.y !== tempPoint.y)) {
@@ -2300,11 +2381,58 @@
                 canvas.style.cursor = currentMode === 'draw' ? 'crosshair' : 'pointer';
             }
             
+            if (stretchingWall) {
+                // Check minimum length
+                if (stretchingWall.length < MIN_WALL_LENGTH) {
+                    // Restore original position
+                    stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
+                    stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
+                    stretchingWall.updateVectors();
+                    showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
+                } else {
+                    // Check if the stretched wall passes validation
+                    const violations = validateWall(walls.indexOf(stretchingWall));
+                    if (violations.length > 0 && violations.some(v => v.type === 'error')) {
+                        // Restore original position
+                        stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
+                        stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
+                        stretchingWall.updateVectors();
+                        showToast('Cannot stretch wall here. Placement would violate rules.', 'error');
+                    } else {
+                        // Valid stretch - save to history and deselect
+                        addToHistory();
+                        selectedWalls = [];
+                    }
+                }
+                
+                stretchingWall = null;
+                stretchingEndpoint = null;
+                originalStretchPoint = null;
+                canvas.style.cursor = 'pointer';
+                validateAllWalls();
+                draw();
+            }
+            
             if (isDragging) {
+                // Check if wall was actually moved
+                const selectedWall = selectedWalls[0];
+                const wasMoved = selectedWall && (
+                    selectedWall.pointA.x !== originalWallPos.ax ||
+                    selectedWall.pointA.y !== originalWallPos.ay ||
+                    selectedWall.pointB.x !== originalWallPos.bx ||
+                    selectedWall.pointB.y !== originalWallPos.by
+                );
+                
                 isDragging = false;
                 canvas.style.cursor = 'pointer';
                 dragStartPos = null;
                 originalWallPos = null;
+                
+                // Only deselect if wall was actually moved
+                if (wasMoved) {
+                    selectedWalls = [];
+                }
+                
                 validateAllWalls();
                 draw();
             }
@@ -2323,6 +2451,39 @@
             
             const pos = getMousePosition(e);
             currentMousePos = pos;
+
+            // Handle wall stretching
+            if (currentMode === 'select' && stretchingWall) {
+                // Constrain to wall's axis (horizontal or vertical)
+                const isHorizontal = Math.abs(originalStretchPoint.bx - originalStretchPoint.ax) > 
+                                    Math.abs(originalStretchPoint.by - originalStretchPoint.ay);
+                
+                let newPoint;
+                if (isHorizontal) {
+                    // Horizontal wall - only allow X movement
+                    newPoint = {
+                        x: snapToGrid(pos.x, GRID_SIZE_EXTERNAL),
+                        y: stretchingEndpoint === 'A' ? originalStretchPoint.ay : originalStretchPoint.by
+                    };
+                } else {
+                    // Vertical wall - only allow Y movement
+                    newPoint = {
+                        x: stretchingEndpoint === 'A' ? originalStretchPoint.ax : originalStretchPoint.bx,
+                        y: snapToGrid(pos.y, GRID_SIZE_EXTERNAL)
+                    };
+                }
+                
+                // Update the endpoint being stretched
+                if (stretchingEndpoint === 'A') {
+                    stretchingWall.pointA = newPoint;
+                } else {
+                    stretchingWall.pointB = newPoint;
+                }
+                
+                stretchingWall.updateVectors();
+                draw();
+                return;
+            }
 
             if (currentMode === 'select' && isDragging && selectedWalls.length === 1) {
                 // Calculate offset from drag start
@@ -2365,6 +2526,16 @@
             if (isPanning) {
                 isPanning = false;
                 canvas.style.cursor = currentMode === 'draw' ? 'crosshair' : 'pointer';
+            }
+            
+            if (stretchingWall) {
+                // Restore original position if user leaves canvas while stretching
+                stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
+                stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
+                stretchingWall.updateVectors();
+                stretchingWall = null;
+                stretchingEndpoint = null;
+                originalStretchPoint = null;
             }
             
             if (isDragging) {
@@ -2468,42 +2639,59 @@
                     validateAllWalls();
                 }
             } else if (currentMode === 'select') {
-                // Find wall at click position (only on current floor)
-                let clickedWall = null;
-                for (let i = walls.length - 1; i >= 0; i--) {
-                    if (walls[i].floorId === currentFloorId && walls[i].containsPoint(pos.x, pos.y)) {
-                        clickedWall = walls[i];
-                        break;
-                    }
-                }
+                // Check if clicked near an endpoint of a SELECTED wall (for stretching)
+                const endpointHit = getEndpointNearPoint(pos.x, pos.y);
                 
-                // Multi-select with shift
-                if (e.shiftKey && clickedWall) {
-                    const index = selectedWalls.indexOf(clickedWall);
-                    if (index > -1) {
-                        // Deselect if already selected
-                        selectedWalls.splice(index, 1);
-                    } else {
-                        // Add to selection
-                        selectedWalls.push(clickedWall);
-                    }
-                } else if (clickedWall) {
-                    // Single select
-                    selectedWalls = [clickedWall];
-                    
-                    // Start dragging
-                    isDragging = true;
-                    dragStartPos = pos;
-                    originalWallPos = {
-                        ax: clickedWall.pointA.x,
-                        ay: clickedWall.pointA.y,
-                        bx: clickedWall.pointB.x,
-                        by: clickedWall.pointB.y
+                if (endpointHit && selectedWalls.includes(endpointHit.wall)) {
+                    // Start stretching (only if wall is already selected)
+                    stretchingWall = endpointHit.wall;
+                    stretchingEndpoint = endpointHit.endpoint;
+                    originalStretchPoint = {
+                        ax: stretchingWall.pointA.x,
+                        ay: stretchingWall.pointA.y,
+                        bx: stretchingWall.pointB.x,
+                        by: stretchingWall.pointB.y
                     };
-                    canvas.style.cursor = 'grabbing';
+                    canvas.style.cursor = 'grab';
                 } else {
-                    // Clicked on empty space - clear selection
-                    selectedWalls = [];
+                    // Find wall at click position (only on current floor)
+                    // Use containsPoint for normal selection (ignore endpoints for unselected walls)
+                    let clickedWall = null;
+                    for (let i = walls.length - 1; i >= 0; i--) {
+                        if (walls[i].floorId === currentFloorId && walls[i].containsPoint(pos.x, pos.y)) {
+                            clickedWall = walls[i];
+                            break;
+                        }
+                    }
+                    
+                    // Multi-select with shift
+                    if (e.shiftKey && clickedWall) {
+                        const index = selectedWalls.indexOf(clickedWall);
+                        if (index > -1) {
+                            // Deselect if already selected
+                            selectedWalls.splice(index, 1);
+                        } else {
+                            // Add to selection
+                            selectedWalls.push(clickedWall);
+                        }
+                    } else if (clickedWall) {
+                        // Single select
+                        selectedWalls = [clickedWall];
+                        
+                        // Start dragging
+                        isDragging = true;
+                        dragStartPos = pos;
+                        originalWallPos = {
+                            ax: clickedWall.pointA.x,
+                            ay: clickedWall.pointA.y,
+                            bx: clickedWall.pointB.x,
+                            by: clickedWall.pointB.y
+                        };
+                        canvas.style.cursor = 'grabbing';
+                    } else {
+                        // Clicked on empty space - clear selection
+                        selectedWalls = [];
+                    }
                 }
                 
                 updateUI();
@@ -2537,8 +2725,10 @@
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+            selectedWalls = [];
             clearDrawingToast();
             updateModeUI();
+            draw();
         });
 
         document.getElementById('selectBtn').addEventListener('click', () => {
@@ -2567,8 +2757,10 @@
                 drawingWall = null;
                 tempPoint = null;
                 wallFlipped = false;
+                selectedWalls = [];
                 clearDrawingToast();
                 updateModeUI();
+                draw();
             }
         });
         
@@ -3015,7 +3207,7 @@
                     <svg width="18" height="18" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -2px; margin-right: 6px;">
                         <path d="M7 1V13M7 1L4 4M7 1L10 4M7 13L4 10M7 13L10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    Changelog — Version 1.0.0
+                    Changelog — Version 1.1.0
                 </h2>
                 <span class="modal-close" id="changelogModalClose">&times;</span>
             </div>
@@ -3025,6 +3217,7 @@
                 <div class="rule-section">
                     <h3>✨ Added</h3>
                     <ul>
+                        <li><strong>Wall stretching:</strong> Click and drag wall endpoints to resize walls, constrained to gridlines with real-time validation</li>
                         <li><strong>Multi-level simulation:</strong> Create and manage multiple building levels with independent wall placement</li>
                         <li><strong>Level visualization:</strong>
                             <ul style="margin-top: 8px;">
