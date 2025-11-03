@@ -3212,28 +3212,40 @@
                 <span class="modal-close" id="changelogModalClose">&times;</span>
             </div>
             <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                <p class="modal-intro">All notable changes and features in this release.</p>
+                <p class="modal-intro">All notable changes and features across all releases.</p>
                 
-                <div class="rule-section">
-                    <h3>✨ Added</h3>
+                <div class="rule-section" style="background: rgba(37, 99, 235, 0.05); padding: 16px; border-radius: 8px; border-left: 3px solid #2563eb;">
+                    <h3 style="margin-top: 0;">Version 1.1.0 — November 3, 2025</h3>
+                    <p style="font-size: 13px; color: #6b6b6b; margin-bottom: 12px;">✨ What's New</p>
                     <ul>
-                        <li><strong>Wall stretching:</strong> Click and drag wall endpoints to resize walls, constrained to gridlines with real-time validation</li>
-                        <li><strong>Multi-level simulation:</strong> Create and manage multiple building levels with independent wall placement</li>
-                        <li><strong>Level visualization:</strong>
-                            <ul style="margin-top: 8px;">
-                                <li>"Show Levels Below" to ghost walls from lower levels with increasing transparency</li>
-                                <li>"Show Levels Above" to show dashed outlines with faint grey fill for upper level walls</li>
+                        <li><strong>Wall Stretching:</strong> Click and drag wall endpoints in Select mode to resize walls
+                            <ul style="margin-top: 6px; font-size: 13px; color: #5a5a5a;">
+                                <li>Blue handles appear on endpoints of selected walls</li>
+                                <li>Constrained to wall's axis (horizontal/vertical)</li>
+                                <li>Snaps to 30cm grid automatically</li>
+                                <li>Real-time validation enforces minimum length (40cm) and placement rules</li>
+                                <li>Automatically reverts if invalid</li>
+                                <li>Full undo/redo support</li>
                             </ul>
                         </li>
-                        <li><strong>Interactive wall drawing:</strong> Draw walls on a 30cm grid with real-time preview, grid snapping, thickness options (20cm/30cm), minimum length 40cm</li>
-                        <li><strong>Wall flipping:</strong> Flip wall orientation during drawing (Space key) or after placement (select + Space)</li>
-                        <li><strong>Selection and manipulation:</strong> Select single/multiple walls (Shift+click), move with drag-and-drop, delete via Delete/Backspace</li>
-                        <li><strong>Undo/Redo system:</strong> Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo — supports all operations</li>
-                        <li><strong>Canvas navigation:</strong> Pan with click and drag, zoom with scroll wheel, grid adjusts to viewport</li>
-                        <li><strong>Real-time validation:</strong> Dynamic restriction zones, red pulsing on conflicting walls, green/red preview, toast notifications</li>
-                        <li><strong>Positional rules modal:</strong> View complete list of enforced rules</li>
-                        <li><strong>Feedback system:</strong> Send feedback directly from the app</li>
-                        <li><strong>Apple-style UI:</strong> Minimal design, custom SVG icons, smooth animations, professional typography</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section" style="margin-top: 24px;">
+                    <h3>Version 1.0.0 — November 3, 2025</h3>
+                    <p style="font-size: 13px; color: #6b6b6b; margin-bottom: 12px;">🎉 Initial Release</p>
+                    <ul>
+                        <li><strong>Multi-level simulation:</strong> Create and manage multiple building levels</li>
+                        <li><strong>Level visualization:</strong> Show Levels Above/Below with transparency</li>
+                        <li><strong>Interactive wall drawing:</strong> 30cm grid, real-time preview, 20cm/30cm thickness</li>
+                        <li><strong>Wall flipping:</strong> Space key to flip orientation during/after drawing</li>
+                        <li><strong>Selection tools:</strong> Multi-select (Shift+click), move, delete</li>
+                        <li><strong>Undo/Redo:</strong> Ctrl/Cmd+Z for undo, supports all operations</li>
+                        <li><strong>Canvas navigation:</strong> Pan and zoom, grid adjusts to viewport</li>
+                        <li><strong>Real-time validation:</strong> Dynamic restriction zones, red pulsing walls, toast notifications</li>
+                        <li><strong>Positional rules modal:</strong> View all enforced rules</li>
+                        <li><strong>Feedback system:</strong> Send feedback from within the app</li>
+                        <li><strong>Apple-style UI:</strong> Minimal design, custom SVG icons, smooth animations</li>
                     </ul>
                 </div>
 
