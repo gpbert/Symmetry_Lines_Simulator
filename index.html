@@ -2568,19 +2568,47 @@
         });
         
         document.getElementById('flipWallBtn').addEventListener('click', () => {
+            // Flip wall during drawing
             if (drawingWall && tempPoint) {
                 wallFlipped = !wallFlipped;
+                draw();
+            }
+            // Flip selected walls
+            else if (selectedWalls.length > 0) {
+                addToHistory(); // Save state before flipping
+                selectedWalls.forEach(wall => {
+                    // Swap pointA and pointB to reverse the wall orientation
+                    const tempPoint = wall.pointA;
+                    wall.pointA = wall.pointB;
+                    wall.pointB = tempPoint;
+                    wall.updateVectors(); // Recalculate direction and normal
+                });
+                validateAllWalls();
                 draw();
             }
         });
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Space key to flip wall during drawing
-            if (e.code === 'Space' && drawingWall && tempPoint) {
-                e.preventDefault(); // Prevent page scroll
-                wallFlipped = !wallFlipped;
-                draw();
+            // Space key to flip wall during drawing or flip selected walls
+            if (e.code === 'Space') {
+                if (drawingWall && tempPoint) {
+                    e.preventDefault(); // Prevent page scroll
+                    wallFlipped = !wallFlipped;
+                    draw();
+                } else if (selectedWalls.length > 0) {
+                    e.preventDefault(); // Prevent page scroll
+                    addToHistory(); // Save state before flipping
+                    selectedWalls.forEach(wall => {
+                        // Swap pointA and pointB to reverse the wall orientation
+                        const tempPoint = wall.pointA;
+                        wall.pointA = wall.pointB;
+                        wall.pointB = tempPoint;
+                        wall.updateVectors(); // Recalculate direction and normal
+                    });
+                    validateAllWalls();
+                    draw();
+                }
             }
             
             // Escape key to cancel wall drawing
