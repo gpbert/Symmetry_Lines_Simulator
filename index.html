@@ -626,6 +626,11 @@
                     </svg>
                     Send Feedback
                 </button>
+                
+                <div id="versionBadge" style="margin-top: 16px; padding: 12px; background: rgba(0, 0, 0, 0.02); border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 8px; cursor: pointer; transition: all 0.2s ease; text-align: center;">
+                    <div style="font-size: 11px; color: #9b9b9b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Version</div>
+                    <div style="font-size: 14px; font-weight: 500; color: #2a2a2a;">1.0.0</div>
+                </div>
             </div>
         </div>
 
@@ -2674,12 +2679,39 @@
         });
         
         // Close modal when clicking outside
+        // Changelog Modal
+        const changelogModal = document.getElementById('changelogModal');
+        const versionBadge = document.getElementById('versionBadge');
+        const changelogModalClose = document.getElementById('changelogModalClose');
+        
+        versionBadge.addEventListener('click', () => {
+            changelogModal.classList.add('show');
+        });
+        
+        changelogModalClose.addEventListener('click', () => {
+            changelogModal.classList.remove('show');
+        });
+        
+        // Add hover effect to version badge
+        versionBadge.addEventListener('mouseenter', () => {
+            versionBadge.style.background = 'rgba(0, 0, 0, 0.04)';
+            versionBadge.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+        });
+        
+        versionBadge.addEventListener('mouseleave', () => {
+            versionBadge.style.background = 'rgba(0, 0, 0, 0.02)';
+            versionBadge.style.borderColor = 'rgba(0, 0, 0, 0.06)';
+        });
+        
         window.addEventListener('click', (e) => {
             if (e.target === rulesModal) {
                 rulesModal.classList.remove('show');
             }
             if (e.target === feedbackModal) {
                 feedbackModal.classList.remove('show');
+            }
+            if (e.target === changelogModal) {
+                changelogModal.classList.remove('show');
             }
         });
         
@@ -2971,6 +3003,78 @@
                 </form>
                 
                 <div id="feedbackStatus" style="display: none; margin-top: 16px; padding: 12px; border-radius: 8px; text-align: center;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Changelog Modal -->
+    <div id="changelogModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>
+                    <svg width="18" height="18" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -2px; margin-right: 6px;">
+                        <path d="M7 1V13M7 1L4 4M7 1L10 4M7 13L4 10M7 13L10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Changelog — Version 1.0.0
+                </h2>
+                <span class="modal-close" id="changelogModalClose">&times;</span>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <p class="modal-intro">All notable changes and features in this release.</p>
+                
+                <div class="rule-section">
+                    <h3>✨ Added</h3>
+                    <ul>
+                        <li><strong>Multi-level simulation:</strong> Create and manage multiple building levels with independent wall placement</li>
+                        <li><strong>Level visualization:</strong>
+                            <ul style="margin-top: 8px;">
+                                <li>"Show Levels Below" to ghost walls from lower levels with increasing transparency</li>
+                                <li>"Show Levels Above" to show dashed outlines with faint grey fill for upper level walls</li>
+                            </ul>
+                        </li>
+                        <li><strong>Interactive wall drawing:</strong> Draw walls on a 30cm grid with real-time preview, grid snapping, thickness options (20cm/30cm), minimum length 40cm</li>
+                        <li><strong>Wall flipping:</strong> Flip wall orientation during drawing (Space key) or after placement (select + Space)</li>
+                        <li><strong>Selection and manipulation:</strong> Select single/multiple walls (Shift+click), move with drag-and-drop, delete via Delete/Backspace</li>
+                        <li><strong>Undo/Redo system:</strong> Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo — supports all operations</li>
+                        <li><strong>Canvas navigation:</strong> Pan with click and drag, zoom with scroll wheel, grid adjusts to viewport</li>
+                        <li><strong>Real-time validation:</strong> Dynamic restriction zones, red pulsing on conflicting walls, green/red preview, toast notifications</li>
+                        <li><strong>Positional rules modal:</strong> View complete list of enforced rules</li>
+                        <li><strong>Feedback system:</strong> Send feedback directly from the app</li>
+                        <li><strong>Apple-style UI:</strong> Minimal design, custom SVG icons, smooth animations, professional typography</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>📏 Rules Enforced</h3>
+                    <ul>
+                        <li><strong>Same-floor aligned walls:</strong> Must share orientation and thickness; cannot overlap</li>
+                        <li><strong>Cross-floor aligned walls:</strong> Can be placed on same gridline with matching orientation/thickness</li>
+                        <li><strong>Cross-floor overlapping walls:</strong> Must share orientation and thickness</li>
+                        <li><strong>Parallel wall distances:</strong>
+                            <ul style="margin-top: 8px;">
+                                <li>Same orientation: Minimum 60cm (column face to column face)</li>
+                                <li>Opposite orientation facing each other: Minimum 120cm</li>
+                                <li>Opposite orientation facing away: Minimum 60cm</li>
+                                <li>Applies to both same-floor and consecutive levels</li>
+                            </ul>
+                        </li>
+                        <li><strong>Perpendicular walls:</strong> No restrictions</li>
+                        <li><strong>Column placement:</strong> 10cm × 10cm columns at both ends of each wall, aligned to internal corner</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>🔧 Technical</h3>
+                    <ul>
+                        <li>Single-file HTML application with embedded CSS and JavaScript</li>
+                        <li>Canvas-based rendering with transformation matrix for pan/zoom</li>
+                        <li>Grid system: 30cm major grid with 10cm subdivisions</li>
+                        <li>Wall model: Internal face (blue line) grid-aligned, external face calculated</li>
+                        <li>Cross-floor validation with body overlap detection</li>
+                        <li>Floating-point tolerance (2mm) for distance comparisons</li>
+                        <li>History stack with 50-operation limit</li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
