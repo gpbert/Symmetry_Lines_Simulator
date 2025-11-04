@@ -726,7 +726,13 @@
             
             if (isRestricted) {
                 // Show error toast
-                const message = `Cannot place here. Min distance: ${restriction.zone.distance / 10}cm`;
+                // Use the reason if provided, otherwise show distance
+                let message;
+                if (restriction.zone.reason) {
+                    message = `Cannot place here. ${restriction.zone.reason}`;
+                } else {
+                    message = `Cannot place here. Min distance: ${restriction.zone.distance / 10}cm`;
+                }
                 const type = 'error';
                 
                 // If toast exists, update it
@@ -1741,14 +1747,31 @@
                         const previewMidX = (tempWall.pointA.x + tempWall.pointB.x) / 2;
                         const previewMidY = (tempWall.pointA.y + tempWall.pointB.y) / 2;
                         
-                        // Check if walls are aligned (same line AND same orientation)
+                        // Check if walls are aligned (same line)
                         const dist = tempWall.distanceToWall(existingWall);
                         if (dist < 10) {
-                            // On same line - check orientation
+                            // On same line - check orientation and thickness
                             const sameOrientation = tempWall.sameOrientation(existingWall);
-                            if (sameOrientation) {
-                                return;
+                            const sameThickness = tempWall.thickness === existingWall.thickness;
+                            
+                            // Only skip (no restriction) if BOTH orientation AND thickness match
+                            if (sameOrientation && sameThickness) {
+                                return; // Valid aligned wall
                             }
+                            
+                            // Same line with mismatched properties
+                            if (sameOrientation && !sameThickness) {
+                                // Same orientation but different thickness
+                                // This is invalid for cross-floor overlaps
+                                const onDifferentFloor = existingWall.floorId !== currentFloorId;
+                                if (onDifferentFloor) {
+                                    // Mark wall as restricting and return (no zone rectangle needed)
+                                    restrictingWalls.add(idx);
+                                    return;
+                                }
+                                // For same floor, continue to show distance-based restriction zone below
+                            }
+                            
                             // Same line but OPPOSITE orientation - INVALID at 0mm!
                             // When walls are on the same line with opposite orientation,
                             // moving perpendicular creates "facing away" configuration = 600mm minimum
@@ -1826,14 +1849,6 @@
                         
                         // Skip if walls are perpendicular (no parallel distance rule)
                         if (!tempWall.isParallelTo(existingWall)) {
-                            return;
-                        }
-                        
-                        // Skip if walls are aligned (on same line) - aligned walls are allowed
-                        const distanceAtoLine = tempWall.pointToLineDistance(
-                            tempWall.pointA, existingWall.pointA, existingWall.pointB
-                        );
-                        if (distanceAtoLine < 1) { // Aligned (within 1mm tolerance)
                             return;
                         }
                         
