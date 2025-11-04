@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.1] - 2025-11-04
+
+### Fixed
+- **Cross-floor validation**: Fixed bug where distance restrictions were incorrectly applying to non-consecutive levels. Rules now only apply between adjacent floors as intended (e.g., Level 1 ↔ Level 2, but NOT Level 1 ↔ Level 3).
+
+---
+
 ## [1.1.0] - 2025-11-03
 
 ### Added
