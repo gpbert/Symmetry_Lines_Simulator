@@ -565,7 +565,7 @@
             <div class="property-group" style="margin-top: 16px;">
                 <label class="checkbox-label">
                     <input type="checkbox" id="slabRestrictionsEnabled">
-                    Slab-based restrictions
+                    Isolate slab systems
                 </label>
             </div>
         </div>
@@ -660,8 +660,8 @@
         const GRID_SIZE_INTERNAL = 100; // mm - 100mm internal
         const MM_TO_PX = 0.15; // Scale factor for visualization (1mm = 0.15px)
         const COLUMN_SIZE = 100; // mm - 10x10cm steel column
-        const MIN_WALL_LENGTH = 600; // mm - smallest valid 600mm multiple
-        const WALL_LENGTH_GRID = 600; // mm - wall lengths must be multiples of this
+        const MIN_WALL_LENGTH = 400; // mm - manufacturable minimum
+        const WALL_LENGTH_GRID = 300; // mm - wall lengths snap to 300mm grid (first valid snap is 600mm since 300 < 400)
         const MIN_DISTANCE_PARALLEL = 600; // mm
         const MIN_DISTANCE_OPPOSITE = 1200; // mm
         const VOID_GRID = 600; // mm - voids snap to 600mm grid
@@ -3318,14 +3318,6 @@
                 });
             }
 
-            // Check wall length is a multiple of 600mm
-            if (wall.length >= MIN_WALL_LENGTH && wall.length % WALL_LENGTH_GRID !== 0) {
-                violations.push({
-                    type: 'error',
-                    message: `Wall length (${Math.round(wall.length / 10)}cm) must be a multiple of ${WALL_LENGTH_GRID / 10}cm`
-                });
-            }
-
             // Check against other walls
             walls.forEach((otherWall, otherIndex) => {
                 if (wallIndex === otherIndex) return;
@@ -4694,8 +4686,7 @@
                 <div class="rule-section">
                     <h3>1. Wall Dimensions</h3>
                     <ul>
-                        <li><strong>Minimum Length:</strong> 60 cm</li>
-                        <li><strong>Length Grid:</strong> Walls must be multiples of 60 cm in length</li>
+                        <li><strong>Minimum Length:</strong> 40 cm</li>
                         <li><strong>Thickness Options:</strong> 20 cm or 30 cm</li>
                     </ul>
                 </div>
@@ -4828,7 +4819,7 @@
                     <h3 style="margin-top: 0;">Version 1.2.0 — March 25, 2026</h3>
                     <p style="font-size: 13px; color: #6b6b6b; margin-bottom: 12px;">New Rules</p>
                     <ul>
-                        <li><strong>600mm Wall Length Snapping:</strong> Wall lengths now snap to 60cm multiples. Minimum wall length increased from 40cm to 60cm.</li>
+                        <li><strong>Wall Length Snapping:</strong> Wall lengths snap to 30cm grid increments. First valid length is 60cm (since 30cm is below the 40cm minimum).</li>
                         <li><strong>Envelope Angle Validation:</strong> Building envelope corners are validated to be exactly 90 or 270 degrees.</li>
                         <li><strong>Void Drawing:</strong> New "Draw Void" mode for placing slab penetrations (stairwells, shafts). Voids snap to 60cm grid with 60cm minimum size.
                             <ul style="margin-top: 6px; font-size: 13px; color: #5a5a5a;">
