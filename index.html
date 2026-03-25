@@ -4424,6 +4424,9 @@
                 selectedWalls = [];
                 drawingWall = null;
                 tempPoint = null;
+                voids = [];
+                selectedVoid = null;
+                drawingVoid = null;
                 history = []; // Clear undo history
                 redoHistory = []; // Clear redo history
                 updateBuildingEnvelopes(); // Update slabs after clearing
@@ -4747,6 +4750,24 @@
                         <li><strong>Validation:</strong> Real-time validation with detailed error messages</li>
                     </ul>
                 </div>
+
+                <div class="rule-section">
+                    <h3>7. Envelope Connections (Rule 4)</h3>
+                    <ul>
+                        <li><strong>Angle Constraint:</strong> All wall connections in a building envelope must be exactly 90 or 270 degrees</li>
+                        <li><strong>Validation:</strong> Invalid angles are flagged with a red indicator at the corner</li>
+                    </ul>
+                </div>
+                <div class="rule-section">
+                    <h3>8. Voids (Rule 7)</h3>
+                    <ul>
+                        <li><strong>Placement Grid:</strong> Voids snap to the 60 cm grid</li>
+                        <li><strong>Minimum Size:</strong> 60 cm x 60 cm</li>
+                        <li><strong>Internal Walls:</strong> Voids must be placed on the non-column face (external face)</li>
+                        <li><strong>External Walls (Envelope):</strong> Voids must be placed on the column face (internal face)</li>
+                        <li><strong>No Overlap:</strong> Voids cannot overlap each other</li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
@@ -4796,13 +4817,31 @@
                     <svg width="18" height="18" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -2px; margin-right: 6px;">
                         <path d="M7 1V13M7 1L4 4M7 1L10 4M7 13L4 10M7 13L10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    Changelog — Version 1.1.1
+                    Changelog — Version 1.2.0
                 </h2>
                 <span class="modal-close" id="changelogModalClose">&times;</span>
             </div>
             <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
                 <p class="modal-intro">All notable changes and features across all releases.</p>
                 
+                <div class="rule-section" style="background: rgba(37, 99, 235, 0.05); padding: 16px; border-radius: 8px; border-left: 3px solid #2563eb;">
+                    <h3 style="margin-top: 0;">Version 1.2.0 — March 25, 2026</h3>
+                    <p style="font-size: 13px; color: #6b6b6b; margin-bottom: 12px;">New Rules</p>
+                    <ul>
+                        <li><strong>600mm Wall Length Snapping:</strong> Wall lengths now snap to 60cm multiples. Minimum wall length increased from 40cm to 60cm.</li>
+                        <li><strong>Envelope Angle Validation:</strong> Building envelope corners are validated to be exactly 90 or 270 degrees.</li>
+                        <li><strong>Void Drawing:</strong> New "Draw Void" mode for placing slab penetrations (stairwells, shafts). Voids snap to 60cm grid with 60cm minimum size.
+                            <ul style="margin-top: 6px; font-size: 13px; color: #5a5a5a;">
+                                <li>Click-drag to draw rectangular voids</li>
+                                <li>Select and resize with corner/edge handles</li>
+                                <li>Wall proximity validation (Rule 7): correct face enforcement for internal vs external walls</li>
+                                <li>Purple restricted zones show invalid placement areas</li>
+                                <li>Full undo/redo support</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+
                 <div class="rule-section" style="background: rgba(37, 99, 235, 0.05); padding: 16px; border-radius: 8px; border-left: 3px solid #2563eb;">
                     <h3 style="margin-top: 0;">Version 1.1.1 — November 4, 2025</h3>
                     <p style="font-size: 13px; color: #6b6b6b; margin-bottom: 12px;">🐛 Bug Fixes</p>
