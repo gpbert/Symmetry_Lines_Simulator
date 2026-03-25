@@ -232,6 +232,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            position: relative;
         }
 
         .canvas-container {
@@ -244,6 +245,36 @@
         canvas {
             cursor: crosshair;
             display: block;
+        }
+
+        .renderer-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        .toggle-view-btn {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 20;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            background: #ffffff;
+            color: #2a2a2a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .toggle-view-btn:hover {
+            background: #fafafa;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+            transform: translateY(-1px);
         }
 
         .info-panel {
@@ -649,9 +680,18 @@
     </div>
 
     <div class="main-content">
-        <div class="canvas-container">
+        <div id="container-2d" class="renderer-container">
             <canvas id="mainCanvas"></canvas>
         </div>
+        <div id="container-3d" class="renderer-container" style="display: none;">
+            <!-- Three.js renders here -->
+        </div>
+        <button id="toggleViewBtn" class="toggle-view-btn" title="Switch to 3D view">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 1L16 5V13L9 17L2 13V5L9 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                <path d="M9 17V9M9 9L2 5M9 9L16 5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+        </button>
     </div>
 
     <script type="module">
@@ -824,7 +864,7 @@
         // ============================================================
         window.addEventListener('DOMContentLoaded', function() {
             // Init renderer
-            renderer2D.init(document.querySelector('.canvas-container'));
+            renderer2D.init(document.getElementById('container-2d'));
             renderer2D.setInteractionState(interactionState);
             renderer2D.activate();
 
@@ -1055,6 +1095,10 @@
         document.getElementById('showLevelsAbove').addEventListener('change', (e) => {
             state.showLevelsAbove = e.target.checked;
             renderer2D.draw();
+        });
+
+        document.getElementById('toggleViewBtn').addEventListener('click', () => {
+            showToast('3D view coming soon', 'info', 2000);
         });
 
         document.getElementById('slabRestrictionsEnabled').addEventListener('change', (e) => {
