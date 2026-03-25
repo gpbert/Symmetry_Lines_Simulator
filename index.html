@@ -695,8 +695,9 @@
         let originalStretchPoint = null;
         
         // Building envelopes (waffle slabs)
-        let buildingEnvelopes = []; // Array of { floorId, polygon: [{x, y}], timestamp }
+        let buildingEnvelopes = []; // Array of { floorId, polygon: [{x, y}], wallIndices: [], timestamp }
         let newEnvelopeTimestamp = null; // Track when a new envelope appears for animation
+        let envelopeAngleViolations = []; // Array of { point, angle, floorId, message }
         
         // Slab-based restrictions toggle
         let slabRestrictionsEnabled = false;
@@ -1467,7 +1468,7 @@
                 
                 const result = findLoop(i, i, [], new Set(), new Set());
                 if (result && result.path && result.path.length >= 3) {
-                    loops.push(result.path);
+                    loops.push({ path: result.path, indices: result.indices });
                     // Mark ALL walls in this loop as visited to prevent duplicates
                     result.indices.forEach(idx => visited.add(idx));
                 }
@@ -1483,11 +1484,13 @@
             
             // Detect envelopes on each floor
             floors.forEach(floor => {
+                const floorWalls = walls.filter(w => w.floorId === floor.id);
                 const loops = detectBuildingEnvelopes(floor.id);
-                loops.forEach(polygon => {
+                loops.forEach(loopResult => {
                     buildingEnvelopes.push({
                         floorId: floor.id,
-                        polygon: polygon,
+                        polygon: loopResult.path,
+                        wallIndices: loopResult.indices.map(localIdx => walls.indexOf(floorWalls[localIdx])),
                         timestamp: Date.now()
                     });
                 });
@@ -2358,6 +2361,16 @@
             
             // Draw building envelopes (waffle slabs) - BEFORE walls so walls appear on top
             drawBuildingEnvelopes();
+
+            // Draw envelope angle violation markers
+            envelopeAngleViolations
+                .filter(v => v.floorId === currentFloorId)
+                .forEach(v => {
+                    ctx.fillStyle = 'rgba(220, 38, 38, 0.8)';
+                    ctx.beginPath();
+                    ctx.arc(mmToPx(v.point.x), mmToPx(v.point.y), 8 / zoomLevel, 0, Math.PI * 2);
+                    ctx.fill();
+                });
 
             // Get violations for walls (needed for rendering below/above level walls)
             const wallViolations = new Map();
@@ -3268,9 +3281,41 @@
             return violations;
         }
 
+        function validateEnvelopeAngles() {
+            const violations = [];
+            buildingEnvelopes.forEach(envelope => {
+                const polygon = envelope.polygon;
+                if (!polygon || polygon.length < 3) return;
+                for (let i = 0; i < polygon.length; i++) {
+                    const prev = polygon[(i - 1 + polygon.length) % polygon.length];
+                    const curr = polygon[i];
+                    const next = polygon[(i + 1) % polygon.length];
+                    const v1x = curr.x - prev.x;
+                    const v1y = curr.y - prev.y;
+                    const v2x = next.x - curr.x;
+                    const v2y = next.y - curr.y;
+                    const cross = v1x * v2y - v1y * v2x;
+                    const dot = v1x * v2x + v1y * v2y;
+                    let angle = Math.atan2(cross, dot) * (180 / Math.PI);
+                    if (angle < 0) angle += 360;
+                    const is90 = Math.abs(angle - 90) < 1;
+                    const is270 = Math.abs(angle - 270) < 1;
+                    if (!is90 && !is270) {
+                        violations.push({
+                            point: curr,
+                            angle: angle,
+                            floorId: envelope.floorId,
+                            message: `Envelope connection must be 90 or 270 degrees (found ${Math.round(angle)}°)`
+                        });
+                    }
+                }
+            });
+            return violations;
+        }
+
         function validateAllWalls() {
             const allViolations = [];
-            
+
             walls.forEach((wall, idx) => {
                 const violations = validateWall(wall, idx);
                 if (violations.length > 0) {
@@ -3279,6 +3324,15 @@
                         violations: violations
                     });
                 }
+            });
+
+            envelopeAngleViolations = validateEnvelopeAngles();
+            envelopeAngleViolations.forEach(v => {
+                allViolations.push({
+                    wallIndex: -1,
+                    violations: [{ type: 'error', message: v.message }],
+                    point: v.point
+                });
             });
 
             // displayViolations removed as validation results panel no longer exists
