@@ -1636,11 +1636,11 @@ export function computeWallExtensions() {
                 const otherBodyPt = dA < TOL ? other.pointB : other.pointA;
                 const towardVBodyY = Math.sign(otherBodyPt.y - connectPt.y);
                 // Column: compute FINAL center position. No renderer offsets needed.
-                // The column sits inside the corner, on the internal face, offset:
-                // - towardBodyX * COLUMN_SIZE/2 along X (toward H's body)
+                // The column sits inside the corner, offset:
+                // - COLUMN_SIZE/2 OUTWARD from body along X (away from H's body)
                 // - wall.n * COLUMN_SIZE/2 (into the wall thickness)
                 const col = {
-                    x: connectPt.x + towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
+                    x: connectPt.x - towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
                     y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
                 };
 
