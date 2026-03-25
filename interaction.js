@@ -1,0 +1,662 @@
+// interaction.js — Shared mouse/keyboard handlers for the Symmetry Line Simulator
+import * as sim from './sim.js';
+import { Wall, state } from './sim.js';
+
+const {
+    GRID_SIZE_EXTERNAL, MIN_WALL_LENGTH, WALL_LENGTH_GRID,
+    VOID_GRID, MIN_VOID_SIZE
+} = sim;
+
+// ============================================================
+// Dependencies injected at init time
+// ============================================================
+let getRenderer = null;
+let showToastFn = null;
+let updateUIFn = null;
+let updateBuildingEnvelopesFn = null;
+let validateAllWallsFn = null;
+let clearDrawingToastFn = null;
+let updateDrawingToastFn = null;
+
+// ============================================================
+// Interaction state
+// ============================================================
+let drawingWall = null;
+let tempPoint = null;
+let wallFlipped = false;
+let drawingToastElement = null;
+let drawingVoid = null;
+let isDragging = false;
+let dragStartPos = null;
+let originalWallPos = null;
+let stretchingWall = null;
+let stretchingEndpoint = null;  // 'A' or 'B'
+let originalStretchPoint = null;
+let resizingVoid = null;
+let originalVoidState = null;
+let currentMousePos = null;
+let currentMouseScreenPos = null;
+
+// ============================================================
+// Public interaction state (read-only getters for renderer)
+// ============================================================
+export const interactionState = {
+    get drawingWall() { return drawingWall; },
+    get tempPoint() { return tempPoint; },
+    get wallFlipped() { return wallFlipped; },
+    get drawingVoid() { return drawingVoid; },
+    get stretchingWall() { return stretchingWall; },
+    get stretchingEndpoint() { return stretchingEndpoint; },
+    get resizingVoid() { return resizingVoid; },
+    get currentMousePos() { return currentMousePos; },
+    get currentMouseScreenPos() { return currentMouseScreenPos; },
+    get updateDrawingToast() { return updateDrawingToastFn; },
+};
+
+// ============================================================
+// Init
+// ============================================================
+export function initInteraction(rendererGetter, opts) {
+    getRenderer = rendererGetter;
+    showToastFn = opts.showToast;
+    updateUIFn = opts.updateUI;
+    updateBuildingEnvelopesFn = opts.updateBuildingEnvelopes;
+    validateAllWallsFn = opts.validateAllWalls;
+    clearDrawingToastFn = opts.clearDrawingToast;
+    updateDrawingToastFn = opts.updateDrawingToast;
+}
+
+// ============================================================
+// Convenience helpers
+// ============================================================
+function renderer() { return getRenderer(); }
+function showToast(msg, type, dur) { if (showToastFn) showToastFn(msg, type, dur); }
+function updateUI() { if (updateUIFn) updateUIFn(); }
+function updateBuildingEnvelopes() { if (updateBuildingEnvelopesFn) updateBuildingEnvelopesFn(); }
+function validateAllWalls() { if (validateAllWallsFn) validateAllWallsFn(); }
+function clearDrawingToast() { if (clearDrawingToastFn) clearDrawingToastFn(); }
+
+// ============================================================
+// Reset helpers (called from sidebar buttons in index.html)
+// ============================================================
+export function resetDrawingState() {
+    drawingWall = null;
+    tempPoint = null;
+    wallFlipped = false;
+    drawingVoid = null;
+    clearDrawingToast();
+}
+
+// ============================================================
+// Event handlers
+// ============================================================
+function onMouseDown(e) {
+    const r = renderer();
+    const canvas = r.getCanvas();
+
+    // Navigation: middle-click or ctrl+click for panning
+    if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
+        r.isPanning = true;
+        // Store last pan position on the renderer's panOffset is handled by mousemove
+        // We store it here as a module-level helper
+        _lastPanClientX = e.clientX;
+        _lastPanClientY = e.clientY;
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+        return;
+    }
+
+    const pos = r.screenToWorld(e);
+    currentMouseScreenPos = { x: pos.screenX, y: pos.screenY };
+
+    if (state.currentMode === 'draw') {
+        if (!drawingWall) {
+            drawingWall = { x: pos.x, y: pos.y };
+            tempPoint = { x: pos.x, y: pos.y };
+        } else {
+            // Finish drawing
+            const thickness = parseInt(document.getElementById('wallThickness').value);
+            const height = 2700;
+
+            const dx = Math.abs(pos.x - drawingWall.x);
+            const dy = Math.abs(pos.y - drawingWall.y);
+            let finalPos = pos;
+            if (dx > dy) {
+                finalPos = { x: pos.x, y: drawingWall.y };
+            } else {
+                finalPos = { x: drawingWall.x, y: pos.y };
+            }
+
+            finalPos = sim.snapLengthToGrid(drawingWall, finalPos);
+
+            const startX = wallFlipped ? finalPos.x : drawingWall.x;
+            const startY = wallFlipped ? finalPos.y : drawingWall.y;
+            const endX = wallFlipped ? drawingWall.x : finalPos.x;
+            const endY = wallFlipped ? drawingWall.y : finalPos.y;
+
+            const newWall = new Wall(
+                startX, startY, endX, endY,
+                thickness, height, null, state.currentFloorId
+            );
+
+            if (newWall.length < MIN_WALL_LENGTH) {
+                showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
+                drawingWall = null;
+                tempPoint = null;
+                clearDrawingToast();
+                r.draw();
+                return;
+            }
+
+            const restriction = sim.isWallInRestrictedZone(newWall);
+            if (restriction.restricted) {
+                let message = 'Cannot place wall here.';
+                if (restriction.zone.reason) {
+                    message += ` ${restriction.zone.reason}`;
+                } else if (restriction.zone.distance) {
+                    message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                }
+                showToast(message, 'error');
+                drawingWall = null;
+                tempPoint = null;
+                clearDrawingToast();
+                r.draw();
+                return;
+            }
+
+            state.walls.push(newWall);
+            sim.addToHistory([newWall]);
+            updateBuildingEnvelopes();
+
+            drawingWall = null;
+            tempPoint = null;
+            wallFlipped = false;
+            clearDrawingToast();
+            updateUI();
+            validateAllWalls();
+        }
+    } else if (state.currentMode === 'select') {
+        // Check if clicked on a resize handle of the selected void
+        if (state.selectedVoid) {
+            const handle = sim.getVoidResizeHandle(pos, state.selectedVoid);
+            if (handle) {
+                resizingVoid = { void: state.selectedVoid, handle: handle };
+                originalVoidState = { x: state.selectedVoid.x, y: state.selectedVoid.y, width: state.selectedVoid.width, height: state.selectedVoid.height };
+                canvas.style.cursor = handle + '-resize';
+                return;
+            }
+        }
+
+        const endpointHit = sim.getEndpointNearPoint(pos.x, pos.y, 20, r.zoomLevel);
+
+        if (endpointHit && state.selectedWalls.includes(endpointHit.wall)) {
+            stretchingWall = endpointHit.wall;
+            stretchingEndpoint = endpointHit.endpoint;
+            originalStretchPoint = {
+                ax: stretchingWall.pointA.x,
+                ay: stretchingWall.pointA.y,
+                bx: stretchingWall.pointB.x,
+                by: stretchingWall.pointB.y
+            };
+            canvas.style.cursor = 'grab';
+        } else {
+            let clickedWall = null;
+            for (let i = state.walls.length - 1; i >= 0; i--) {
+                if (state.walls[i].floorId === state.currentFloorId && state.walls[i].containsPoint(pos.x, pos.y)) {
+                    clickedWall = state.walls[i];
+                    break;
+                }
+            }
+
+            if (e.shiftKey && clickedWall) {
+                const index = state.selectedWalls.indexOf(clickedWall);
+                if (index > -1) {
+                    state.selectedWalls.splice(index, 1);
+                } else {
+                    state.selectedWalls.push(clickedWall);
+                }
+                state.selectedVoid = null;
+            } else if (clickedWall) {
+                state.selectedWalls = [clickedWall];
+                state.selectedVoid = null;
+
+                isDragging = true;
+                dragStartPos = pos;
+                originalWallPos = {
+                    ax: clickedWall.pointA.x,
+                    ay: clickedWall.pointA.y,
+                    bx: clickedWall.pointB.x,
+                    by: clickedWall.pointB.y
+                };
+                canvas.style.cursor = 'grabbing';
+            } else {
+                const clickedVoid = sim.getVoidAtPoint(pos.x, pos.y, state.currentFloorId);
+                if (clickedVoid) {
+                    state.selectedWalls = [];
+                    state.selectedVoid = clickedVoid;
+                } else {
+                    state.selectedWalls = [];
+                    state.selectedVoid = null;
+                }
+            }
+        }
+
+        updateUI();
+        r.draw();
+    } else if (state.currentMode === 'delete') {
+        let clickedWall = null;
+        for (let i = state.walls.length - 1; i >= 0; i--) {
+            if (state.walls[i].floorId === state.currentFloorId && state.walls[i].containsPoint(pos.x, pos.y)) {
+                clickedWall = state.walls[i];
+                break;
+            }
+        }
+
+        if (clickedWall) {
+            sim.addToHistory();
+            const index = state.walls.indexOf(clickedWall);
+            if (index > -1) {
+                state.walls.splice(index, 1);
+                showToast('Deleted 1 wall', 'info', 2000);
+                updateUI();
+                validateAllWalls();
+            }
+        }
+        if (!clickedWall) {
+            const clickedVoid = sim.getVoidAtPoint(pos.x, pos.y, state.currentFloorId);
+            if (clickedVoid) {
+                const idx = state.voids.indexOf(clickedVoid);
+                if (idx !== -1) {
+                    state.voids.splice(idx, 1);
+                    sim.addVoidDeletionToHistory(clickedVoid);
+                    showToast('Void deleted', 'info', 2000);
+                    r.draw();
+                }
+            }
+        }
+    } else if (state.currentMode === 'void') {
+        if (!drawingVoid) {
+            const snappedX = sim.snapToVoidGrid(pos.x);
+            const snappedY = sim.snapToVoidGrid(pos.y);
+            drawingVoid = { startX: snappedX, startY: snappedY };
+        } else {
+            const snappedX = sim.snapToVoidGrid(pos.x);
+            const snappedY = sim.snapToVoidGrid(pos.y);
+            const x = Math.min(drawingVoid.startX, snappedX);
+            const y = Math.min(drawingVoid.startY, snappedY);
+            const width = Math.abs(snappedX - drawingVoid.startX);
+            const height = Math.abs(snappedY - drawingVoid.startY);
+            if (width < MIN_VOID_SIZE || height < MIN_VOID_SIZE) {
+                showToast(`Void is too small. Minimum size: ${MIN_VOID_SIZE / 10}cm x ${MIN_VOID_SIZE / 10}cm`, 'error');
+                drawingVoid = null;
+                r.draw();
+                return;
+            }
+            const overlaps = state.voids.some(v =>
+                v.floorId === state.currentFloorId &&
+                x < v.x + v.width && x + width > v.x &&
+                y < v.y + v.height && y + height > v.y
+            );
+            if (overlaps) {
+                showToast('Voids cannot overlap', 'error');
+                drawingVoid = null;
+                r.draw();
+                return;
+            }
+            const newVoid = {
+                id: sim.generateVoidId(),
+                floorId: state.currentFloorId,
+                x: x, y: y,
+                width: width, height: height
+            };
+            const proximityViolations = sim.validateVoidWallProximity(newVoid);
+            if (proximityViolations.length > 0) {
+                showToast(proximityViolations[0].message, 'error');
+                drawingVoid = null;
+                r.draw();
+                return;
+            }
+            state.voids.push(newVoid);
+            sim.addToHistory([newVoid], 'void');
+            drawingVoid = null;
+            r.draw();
+            showToast('Void placed', 'info', 2000);
+        }
+    }
+}
+
+// Pan state (shared between mousedown/mousemove/mouseup)
+let _lastPanClientX = 0;
+let _lastPanClientY = 0;
+
+function onMouseUp(e) {
+    const r = renderer();
+    const canvas = r.getCanvas();
+
+    if (r.isPanning) {
+        r.isPanning = false;
+        canvas.style.cursor = state.currentMode === 'draw' ? 'crosshair' : 'pointer';
+    }
+
+    if (stretchingWall) {
+        if (stretchingWall.length < MIN_WALL_LENGTH) {
+            stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
+            stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
+            stretchingWall.updateVectors();
+            showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
+        } else {
+            const stretchIdx = state.walls.indexOf(stretchingWall);
+            const violations = sim.validateWall(stretchingWall, stretchIdx);
+            if (violations.length > 0 && violations.some(v => v.type === 'error')) {
+                stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
+                stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
+                stretchingWall.updateVectors();
+                showToast('Cannot stretch wall here. Placement would violate rules.', 'error');
+            } else {
+                sim.addToHistory();
+                updateBuildingEnvelopes();
+                state.selectedWalls = [];
+            }
+        }
+
+        stretchingWall = null;
+        stretchingEndpoint = null;
+        originalStretchPoint = null;
+        canvas.style.cursor = 'pointer';
+        validateAllWalls();
+        r.draw();
+    }
+
+    if (resizingVoid) {
+        const v = resizingVoid.void;
+        const overlaps = state.voids.some(other =>
+            other !== v && other.floorId === v.floorId &&
+            v.x < other.x + other.width && v.x + v.width > other.x &&
+            v.y < other.y + other.height && v.y + v.height > other.y
+        );
+        if (overlaps) {
+            v.x = originalVoidState.x; v.y = originalVoidState.y;
+            v.width = originalVoidState.width; v.height = originalVoidState.height;
+            showToast('Resize would overlap another void', 'error');
+        } else {
+            const operation = {
+                objectType: 'void-resize',
+                voidRef: v,
+                oldState: { ...originalVoidState },
+                newState: { x: v.x, y: v.y, width: v.width, height: v.height },
+                timestamp: Date.now()
+            };
+            state.history.push(operation);
+            state.redoHistory = [];
+        }
+        resizingVoid = null;
+        originalVoidState = null;
+        canvas.style.cursor = 'pointer';
+        r.draw();
+    }
+
+    if (isDragging) {
+        const selectedWall = state.selectedWalls[0];
+        const wasMoved = selectedWall && (
+            selectedWall.pointA.x !== originalWallPos.ax ||
+            selectedWall.pointA.y !== originalWallPos.ay ||
+            selectedWall.pointB.x !== originalWallPos.bx ||
+            selectedWall.pointB.y !== originalWallPos.by
+        );
+
+        isDragging = false;
+        canvas.style.cursor = 'pointer';
+        dragStartPos = null;
+        originalWallPos = null;
+
+        if (wasMoved) {
+            updateBuildingEnvelopes();
+            state.selectedWalls = [];
+        }
+
+        validateAllWalls();
+        r.draw();
+    }
+}
+
+function onMouseMove(e) {
+    const r = renderer();
+
+    if (r.isPanning) {
+        const dx = e.clientX - _lastPanClientX;
+        const dy = e.clientY - _lastPanClientY;
+        r.panOffset.x += dx;
+        r.panOffset.y += dy;
+        _lastPanClientX = e.clientX;
+        _lastPanClientY = e.clientY;
+        r.draw();
+        return;
+    }
+
+    const pos = r.screenToWorld(e);
+    currentMousePos = { x: pos.x, y: pos.y };
+    currentMouseScreenPos = { x: pos.screenX, y: pos.screenY };
+
+    // Handle void resizing
+    if (state.currentMode === 'select' && resizingVoid) {
+        const v = resizingVoid.void;
+        const h = resizingVoid.handle;
+        const snappedX = sim.snapToVoidGrid(pos.x);
+        const snappedY = sim.snapToVoidGrid(pos.y);
+        let newX = v.x, newY = v.y, newW = v.width, newH = v.height;
+        if (h.includes('w')) { newX = snappedX; newW = originalVoidState.x + originalVoidState.width - snappedX; }
+        if (h.includes('e')) { newW = snappedX - originalVoidState.x; }
+        if (h.includes('n')) { newY = snappedY; newH = originalVoidState.y + originalVoidState.height - snappedY; }
+        if (h.includes('s')) { newH = snappedY - originalVoidState.y; }
+        if (h === 'n' || h === 's') { newX = v.x; newW = v.width; }
+        if (h === 'e' || h === 'w') { newY = v.y; newH = v.height; }
+        if (newW >= MIN_VOID_SIZE && newH >= MIN_VOID_SIZE) {
+            v.x = newX; v.y = newY; v.width = newW; v.height = newH;
+        }
+        r.draw();
+        return;
+    }
+
+    // Handle wall stretching
+    if (state.currentMode === 'select' && stretchingWall) {
+        const isHorizontal = Math.abs(originalStretchPoint.bx - originalStretchPoint.ax) >
+                            Math.abs(originalStretchPoint.by - originalStretchPoint.ay);
+
+        let newPoint;
+        if (isHorizontal) {
+            newPoint = {
+                x: sim.snapToGrid(pos.x, GRID_SIZE_EXTERNAL),
+                y: stretchingEndpoint === 'A' ? originalStretchPoint.ay : originalStretchPoint.by
+            };
+        } else {
+            newPoint = {
+                x: stretchingEndpoint === 'A' ? originalStretchPoint.ax : originalStretchPoint.bx,
+                y: sim.snapToGrid(pos.y, GRID_SIZE_EXTERNAL)
+            };
+        }
+
+        const otherPoint = stretchingEndpoint === 'A'
+            ? { x: stretchingWall.pointB.x, y: stretchingWall.pointB.y }
+            : { x: stretchingWall.pointA.x, y: stretchingWall.pointA.y };
+
+        const stretchDx = Math.abs(newPoint.x - otherPoint.x);
+        const stretchDy = Math.abs(newPoint.y - otherPoint.y);
+        const rawLength = Math.max(stretchDx, stretchDy);
+        const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+
+        if (snappedLength >= MIN_WALL_LENGTH) {
+            if (isHorizontal) {
+                const dir = newPoint.x > otherPoint.x ? 1 : -1;
+                newPoint.x = otherPoint.x + dir * snappedLength;
+            } else {
+                const dir = newPoint.y > otherPoint.y ? 1 : -1;
+                newPoint.y = otherPoint.y + dir * snappedLength;
+            }
+        }
+
+        if (stretchingEndpoint === 'A') {
+            stretchingWall.pointA = newPoint;
+        } else {
+            stretchingWall.pointB = newPoint;
+        }
+
+        stretchingWall.updateVectors();
+        r.draw();
+        return;
+    }
+
+    // Handle wall dragging
+    if (state.currentMode === 'select' && isDragging && state.selectedWalls.length === 1) {
+        const offsetX = pos.x - dragStartPos.x;
+        const offsetY = pos.y - dragStartPos.y;
+
+        const snappedOffsetX = sim.snapToGrid(offsetX, GRID_SIZE_EXTERNAL);
+        const snappedOffsetY = sim.snapToGrid(offsetY, GRID_SIZE_EXTERNAL);
+
+        const selectedWall = state.selectedWalls[0];
+        selectedWall.pointA.x = originalWallPos.ax + snappedOffsetX;
+        selectedWall.pointA.y = originalWallPos.ay + snappedOffsetY;
+        selectedWall.pointB.x = originalWallPos.bx + snappedOffsetX;
+        selectedWall.pointB.y = originalWallPos.by + snappedOffsetY;
+        selectedWall.updateVectors();
+
+        r.draw();
+        return;
+    }
+
+    // Handle drawing preview
+    if (state.currentMode === 'draw' && drawingWall) {
+        const dx = Math.abs(pos.x - drawingWall.x);
+        const dy = Math.abs(pos.y - drawingWall.y);
+
+        let constrained;
+        if (dx > dy) {
+            constrained = { x: pos.x, y: drawingWall.y };
+        } else {
+            constrained = { x: drawingWall.x, y: pos.y };
+        }
+
+        tempPoint = sim.snapLengthToGrid(drawingWall, constrained);
+    }
+
+    // Handle void drawing preview
+    if (state.currentMode === 'void' && drawingVoid) {
+        tempPoint = {
+            x: sim.snapToVoidGrid(pos.x),
+            y: sim.snapToVoidGrid(pos.y)
+        };
+    }
+
+    r.draw();
+}
+
+function onMouseLeave() {
+    const r = renderer();
+    const canvas = r.getCanvas();
+
+    if (r.isPanning) {
+        r.isPanning = false;
+        canvas.style.cursor = state.currentMode === 'draw' ? 'crosshair' : 'pointer';
+    }
+
+    if (stretchingWall) {
+        stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
+        stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
+        stretchingWall.updateVectors();
+        stretchingWall = null;
+        stretchingEndpoint = null;
+        originalStretchPoint = null;
+    }
+
+    if (isDragging) {
+        isDragging = false;
+        canvas.style.cursor = 'pointer';
+        dragStartPos = null;
+        originalWallPos = null;
+    }
+
+    currentMousePos = null;
+    r.draw();
+}
+
+function onKeyDown(e) {
+    const r = renderer();
+
+    // Space key to flip wall
+    if (e.code === 'Space') {
+        if (drawingWall && tempPoint) {
+            e.preventDefault();
+            wallFlipped = !wallFlipped;
+            r.draw();
+        } else if (state.selectedWalls.length > 0) {
+            e.preventDefault();
+            sim.addToHistory();
+            state.selectedWalls.forEach(wall => {
+                const tp = wall.pointA;
+                wall.pointA = wall.pointB;
+                wall.pointB = tp;
+                wall.updateVectors();
+            });
+            validateAllWalls();
+            r.draw();
+        }
+    }
+
+    // Escape to cancel wall drawing
+    if (e.key === 'Escape' && drawingWall) {
+        e.preventDefault();
+        drawingWall = null;
+        tempPoint = null;
+        wallFlipped = false;
+        clearDrawingToast();
+        r.draw();
+    }
+
+    // Ctrl+Z / Cmd+Z for undo
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (updateUIFn && updateUIFn._undo) {
+            updateUIFn._undo();
+        }
+    }
+
+    // Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y for redo
+    if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key === 'z' || e.key === 'y')) {
+        e.preventDefault();
+        if (updateUIFn && updateUIFn._redo) {
+            updateUIFn._redo();
+        }
+    }
+
+    // Delete or Backspace to delete selected walls
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedWalls.length > 0 && state.currentMode === 'select') {
+        e.preventDefault();
+        sim.addToHistory();
+        const count = state.selectedWalls.length;
+        state.walls = state.walls.filter(wall => !state.selectedWalls.includes(wall));
+        state.selectedWalls = [];
+        updateBuildingEnvelopes();
+        updateUI();
+        validateAllWalls();
+        showToast(`Deleted ${count} wall${count > 1 ? 's' : ''}`, 'info', 2000);
+    }
+}
+
+// ============================================================
+// Bind / Unbind
+// ============================================================
+export function bindToCanvas(canvasEl) {
+    canvasEl.addEventListener('mousedown', onMouseDown);
+    canvasEl.addEventListener('mouseup', onMouseUp);
+    canvasEl.addEventListener('mousemove', onMouseMove);
+    canvasEl.addEventListener('mouseleave', onMouseLeave);
+    window.addEventListener('keydown', onKeyDown);
+}
+
+export function unbindFromCanvas(canvasEl) {
+    canvasEl.removeEventListener('mousedown', onMouseDown);
+    canvasEl.removeEventListener('mouseup', onMouseUp);
+    canvasEl.removeEventListener('mousemove', onMouseMove);
+    canvasEl.removeEventListener('mouseleave', onMouseLeave);
+    window.removeEventListener('keydown', onKeyDown);
+}
