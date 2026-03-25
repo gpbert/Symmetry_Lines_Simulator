@@ -185,7 +185,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     ctx.fill();
     ctx.stroke();
 
-    // Draw INTERNAL face line (BLUE)
+    // Draw INTERNAL face line (BLUE) — always uses original pointA/pointB,
+    // not extended/shortened positions, so it stays on the internal face only
     if (overrideColor) {
         ctx.strokeStyle = overrideColor;
     } else {
@@ -193,8 +194,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     }
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(mmToPx(effectiveA.x), mmToPx(effectiveA.y));
-    ctx.lineTo(mmToPx(effectiveB.x), mmToPx(effectiveB.y));
+    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
+    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
     ctx.stroke();
 
     // Draw external face line
