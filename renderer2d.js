@@ -245,8 +245,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
 }
 
 function drawBuildingEnvelopes() {
-    const showLevelsBelow = document.getElementById('showOtherFloors').checked;
-    const showLevelsAbove = document.getElementById('showLevelsAbove')?.checked;
+    const showLevelsBelow = state.showLevelsBelow;
+    const showLevelsAbove = state.showLevelsAbove;
 
     state.buildingEnvelopes.forEach(envelope => {
         const onCurrentFloor = envelope.floorId === state.currentFloorId;
@@ -443,7 +443,7 @@ function draw() {
     });
 
     // Draw walls from levels below if enabled
-    if (document.getElementById('showOtherFloors').checked) {
+    if (state.showLevelsBelow) {
         state.walls.forEach((wall, idx) => {
             if (wall.floorId < state.currentFloorId) {
                 const floorsBelow = state.currentFloorId - wall.floorId;
@@ -455,8 +455,7 @@ function draw() {
     }
 
     // Draw walls from levels above if enabled
-    const showLevelsAboveCheckbox = document.getElementById('showLevelsAbove');
-    if (showLevelsAboveCheckbox && showLevelsAboveCheckbox.checked) {
+    if (state.showLevelsAbove) {
         state.walls.forEach((wall, idx) => {
             if (wall.floorId > state.currentFloorId) {
                 const floorsAbove = wall.floorId - state.currentFloorId;
@@ -490,8 +489,7 @@ function draw() {
     }
 
     // Draw voids from other floors (ghost)
-    if (document.getElementById('showOtherFloors').checked ||
-        document.getElementById('showLevelsAbove').checked) {
+    if (state.showLevelsBelow || state.showLevelsAbove) {
         state.voids.forEach(v => {
             if (v.floorId !== state.currentFloorId) {
                 const floorDiff = Math.abs(v.floorId - state.currentFloorId);

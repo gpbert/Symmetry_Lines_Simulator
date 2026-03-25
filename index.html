@@ -1048,8 +1048,14 @@
             }
         });
 
-        document.getElementById('showOtherFloors').addEventListener('change', () => renderer2D.draw());
-        document.getElementById('showLevelsAbove').addEventListener('change', () => renderer2D.draw());
+        document.getElementById('showOtherFloors').addEventListener('change', (e) => {
+            state.showLevelsBelow = e.target.checked;
+            renderer2D.draw();
+        });
+        document.getElementById('showLevelsAbove').addEventListener('change', (e) => {
+            state.showLevelsAbove = e.target.checked;
+            renderer2D.draw();
+        });
 
         document.getElementById('slabRestrictionsEnabled').addEventListener('change', (e) => {
             state.slabRestrictionsEnabled = e.target.checked;
