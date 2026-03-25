@@ -310,11 +310,14 @@ function buildWalls() {
         }
     });
 
+    // Compute visual corner extensions
+    const extensions = sim.computeWallExtensions();
+
     // Ghost walls below
     if (state.showLevelsBelow) {
         state.walls.forEach((wall, idx) => {
             if (wall.floorId < state.currentFloorId) {
-                buildWallMesh(wall, ghostGroup, materials.wallGhost, idx, wallViolations);
+                buildWallMesh(wall, ghostGroup, materials.wallGhost, idx, wallViolations, extensions.get(idx));
             }
         });
     }
@@ -325,7 +328,7 @@ function buildWalls() {
             if (wall.floorId > state.currentFloorId) {
                 const mat = materials.wallGhost.clone();
                 mat.opacity = 0.12;
-                buildWallMesh(wall, ghostGroup, mat, idx, wallViolations);
+                buildWallMesh(wall, ghostGroup, mat, idx, wallViolations, extensions.get(idx));
             }
         });
     }
@@ -346,7 +349,7 @@ function buildWalls() {
                 mat = materials.wallDefault;
             }
 
-            buildWallMesh(wall, wallGroup, mat, idx, wallViolations);
+            buildWallMesh(wall, wallGroup, mat, idx, wallViolations, extensions.get(idx));
 
             // Endpoint handles for selected walls
             if (isSelected) {
@@ -375,11 +378,19 @@ function buildWalls() {
     });
 }
 
-function buildWallMesh(wall, group, material, idx, wallViolations) {
+function buildWallMesh(wall, group, material, idx, wallViolations, ext) {
     const floorY = getFloorY(wall.floorId);
 
+    // Compute effective endpoints using corner extensions (rendering-only)
+    const effectiveA = ext?.extA || wall.pointA;
+    const effectiveB = ext?.extB || wall.pointB;
+    const effectiveLength = Math.sqrt(
+        Math.pow(effectiveB.x - effectiveA.x, 2) +
+        Math.pow(effectiveB.y - effectiveA.y, 2)
+    );
+
     // Wall dimensions in Three.js units
-    const wallLength = mmToUnits(wall.length);
+    const wallLength = mmToUnits(effectiveLength);
     const wallHeight = mmToUnits(wall.height);
     const wallThickness = mmToUnits(wall.thickness);
 
@@ -392,9 +403,9 @@ function buildWallMesh(wall, group, material, idx, wallViolations) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    // Calculate midpoint of internal face (A-B line)
-    const midX = mmToUnits((wall.pointA.x + wall.pointB.x) / 2);
-    const midZ = mmToUnits((wall.pointA.y + wall.pointB.y) / 2);
+    // Calculate midpoint of effective internal face line
+    const midX = mmToUnits((effectiveA.x + effectiveB.x) / 2);
+    const midZ = mmToUnits((effectiveA.y + effectiveB.y) / 2);
 
     // Offset by half thickness in normal direction (A/B are on internal face)
     const offsetX = mmToUnits(wall.n.x * wall.thickness / 2);
@@ -412,24 +423,27 @@ function buildWallMesh(wall, group, material, idx, wallViolations) {
 
     group.add(mesh);
 
-    // Steel columns at endpoints
+    // Steel columns at endpoints (use extended column positions if available)
+    const colAPos = ext?.colA || effectiveA;
+    const colBPos = ext?.colB || effectiveB;
+
     const colSize = mmToUnits(COLUMN_SIZE);
     const colGeo = new THREE.BoxGeometry(colSize, wallHeight + 0.02, colSize);
 
     const colA = new THREE.Mesh(colGeo, materials.column);
     colA.position.set(
-        mmToUnits(wall.pointA.x),
+        mmToUnits(colAPos.x),
         floorY + wallHeight / 2,
-        mmToUnits(wall.pointA.y)
+        mmToUnits(colAPos.y)
     );
     colA.castShadow = true;
     group.add(colA);
 
     const colB = new THREE.Mesh(colGeo, materials.column);
     colB.position.set(
-        mmToUnits(wall.pointB.x),
+        mmToUnits(colBPos.x),
         floorY + wallHeight / 2,
-        mmToUnits(wall.pointB.y)
+        mmToUnits(colBPos.y)
     );
     colB.castShadow = true;
     group.add(colB);
