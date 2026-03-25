@@ -1629,10 +1629,11 @@ export function computeWallExtensions() {
 
                 const extPt = { x: targetX, y: pt.y };
 
-                // Column: at extension endpoint (V's external face), offset COLUMN_SIZE/2 toward wall body
-                // This places the column just outside the vertical wall, flush with its external face
+                // Column: aligned with the vertical wall's internal face (same X as V's column),
+                // sitting right next to V's column along the internal face line
+                const connectPt = dA < TOL ? other.pointA : other.pointB;
                 const col = {
-                    x: targetX + towardBodyX * COLUMN_SIZE / 2,
+                    x: connectPt.x,
                     y: pt.y
                 };
 
