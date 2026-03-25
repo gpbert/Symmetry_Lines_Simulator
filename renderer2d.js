@@ -148,9 +148,20 @@ function drawRestrictedZones() {
     });
 }
 
-function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, overrideColor = null) {
+function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, overrideColor = null, ext = null) {
     const hasViolation = violations.length > 0;
-    const external = wall.getExternalFacePoints();
+
+    // Compute effective endpoints using corner extensions (rendering-only)
+    const effectiveA = ext?.extA || wall.pointA;
+    const effectiveB = ext?.extB || wall.pointB;
+    const externalA = {
+        x: effectiveA.x + wall.n.x * wall.thickness,
+        y: effectiveA.y + wall.n.y * wall.thickness
+    };
+    const externalB = {
+        x: effectiveB.x + wall.n.x * wall.thickness,
+        y: effectiveB.y + wall.n.y * wall.thickness
+    };
 
     ctx.globalAlpha = opacity;
 
@@ -166,10 +177,10 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     ctx.lineWidth = isSelected ? 3 : 2;
 
     ctx.beginPath();
-    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
-    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-    ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
+    ctx.moveTo(mmToPx(effectiveA.x), mmToPx(effectiveA.y));
+    ctx.lineTo(mmToPx(effectiveB.x), mmToPx(effectiveB.y));
+    ctx.lineTo(mmToPx(externalB.x), mmToPx(externalB.y));
+    ctx.lineTo(mmToPx(externalA.x), mmToPx(externalA.y));
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
@@ -182,8 +193,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     }
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
+    ctx.moveTo(mmToPx(effectiveA.x), mmToPx(effectiveA.y));
+    ctx.lineTo(mmToPx(effectiveB.x), mmToPx(effectiveB.y));
     ctx.stroke();
 
     // Draw external face line
@@ -195,11 +206,14 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     }
     ctx.lineWidth = isSelected ? 3 : 2;
     ctx.beginPath();
-    ctx.moveTo(mmToPx(external.a.x), mmToPx(external.a.y));
-    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
+    ctx.moveTo(mmToPx(externalA.x), mmToPx(externalA.y));
+    ctx.lineTo(mmToPx(externalB.x), mmToPx(externalB.y));
     ctx.stroke();
 
-    // Draw steel columns
+    // Draw steel columns (use extended column positions if available)
+    const colABase = ext?.colA || effectiveA;
+    const colBBase = ext?.colB || effectiveB;
+
     const columnSize = mmToPx(COLUMN_SIZE);
     if (overrideColor) {
         ctx.fillStyle = overrideColor;
@@ -208,8 +222,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
                        isSelected ? '#2563eb' : '#6b7280';
     }
 
-    const colAX = wall.pointA.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
-    const colAY = wall.pointA.y + (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
+    const colAX = colABase.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
+    const colAY = colABase.y + (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
     ctx.fillRect(
         mmToPx(colAX) - columnSize / 2,
         mmToPx(colAY) - columnSize / 2,
@@ -217,8 +231,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
         columnSize
     );
 
-    const colBX = wall.pointB.x - (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
-    const colBY = wall.pointB.y - (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
+    const colBX = colBBase.x - (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
+    const colBY = colBBase.y - (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
     ctx.fillRect(
         mmToPx(colBX) - columnSize / 2,
         mmToPx(colBY) - columnSize / 2,
@@ -442,6 +456,9 @@ function draw() {
         }
     });
 
+    // Compute visual corner extensions
+    const extensions = sim.computeWallExtensions();
+
     // Draw walls from levels below if enabled
     if (state.showLevelsBelow) {
         state.walls.forEach((wall, idx) => {
@@ -449,7 +466,7 @@ function draw() {
                 const floorsBelow = state.currentFloorId - wall.floorId;
                 const opacity = Math.max(0.1, 0.5 - (floorsBelow * 0.15));
                 const violations = wallViolations.get(idx) || [];
-                drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#9ca3af');
+                drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#9ca3af', extensions.get(idx));
             }
         });
     }
@@ -512,7 +529,7 @@ function draw() {
         if (wall.floorId === state.currentFloorId) {
             const isSelected = state.selectedWalls.includes(wall);
             const violations = wallViolations.get(idx) || [];
-            drawWall(wall, isSelected, violations);
+            drawWall(wall, isSelected, violations, 1.0, null, extensions.get(idx));
         }
     });
 
