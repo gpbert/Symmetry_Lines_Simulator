@@ -55,7 +55,7 @@ const materials = {};
 
 function initMaterials() {
     materials.wallDefault = new THREE.MeshStandardMaterial({
-        color: 0x78909c,
+        color: 0x6b7280,
         roughness: 0.6,
         metalness: 0.1,
     });
@@ -70,7 +70,7 @@ function initMaterials() {
         metalness: 0.1,
     });
     materials.wallGhost = new THREE.MeshStandardMaterial({
-        color: 0x90a4ae,
+        color: 0x9ca3af,
         transparent: true,
         opacity: 0.25,
         roughness: 0.7,
@@ -174,7 +174,7 @@ function setupScene() {
     scene.add(dirLight);
 
     // A subtle hemisphere light for fill
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xb0bec5, 0.3);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9ca3af, 0.3);
     scene.add(hemiLight);
 
     // OrbitControls
@@ -209,7 +209,7 @@ function setupScene() {
 
     // Snap cursor indicator
     const cursorGeo = new THREE.RingGeometry(0.1, 0.15, 16);
-    const cursorMat = new THREE.MeshBasicMaterial({ color: 0x2196F3, side: THREE.DoubleSide });
+    const cursorMat = new THREE.MeshBasicMaterial({ color: 0x2563eb, side: THREE.DoubleSide });
     cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
     cursorMesh.rotation.x = -Math.PI / 2;
     cursorMesh.visible = false;

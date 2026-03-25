@@ -122,8 +122,8 @@ function drawRestrictedZones() {
 
         zones.forEach(zone => {
             ctx.fillStyle = zone.type === 'opposite' ?
-                'rgba(244, 67, 54, 0.1)' :
-                'rgba(255, 152, 0, 0.08)';
+                'rgba(220, 38, 38, 0.1)' :
+                'rgba(245, 158, 11, 0.08)';
 
             ctx.fillRect(
                 mmToPx(zone.x1),
@@ -133,8 +133,8 @@ function drawRestrictedZones() {
             );
 
             ctx.strokeStyle = zone.type === 'opposite' ?
-                'rgba(244, 67, 54, 0.3)' :
-                'rgba(255, 152, 0, 0.2)';
+                'rgba(220, 38, 38, 0.3)' :
+                'rgba(245, 158, 11, 0.2)';
             ctx.lineWidth = 1;
             ctx.setLineDash([4, 4]);
             ctx.strokeRect(
@@ -158,10 +158,10 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
         ctx.fillStyle = overrideColor.replace(')', ', 0.15)').replace('rgb', 'rgba');
         ctx.strokeStyle = overrideColor;
     } else {
-        ctx.fillStyle = hasViolation ? 'rgba(244, 67, 54, 0.2)' :
-                       isSelected ? 'rgba(33, 150, 243, 0.3)' : 'rgba(158, 158, 158, 0.3)';
-        ctx.strokeStyle = hasViolation ? '#f44336' :
-                         isSelected ? '#2196F3' : '#757575';
+        ctx.fillStyle = hasViolation ? 'rgba(220, 38, 38, 0.2)' :
+                       isSelected ? 'rgba(37, 99, 235, 0.3)' : 'rgba(107, 114, 128, 0.3)';
+        ctx.strokeStyle = hasViolation ? '#dc2626' :
+                         isSelected ? '#2563eb' : '#6b7280';
     }
     ctx.lineWidth = isSelected ? 3 : 2;
 
@@ -178,7 +178,7 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     if (overrideColor) {
         ctx.strokeStyle = overrideColor;
     } else {
-        ctx.strokeStyle = '#2196F3';
+        ctx.strokeStyle = '#2563eb';
     }
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -190,8 +190,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     if (overrideColor) {
         ctx.strokeStyle = overrideColor;
     } else {
-        ctx.strokeStyle = hasViolation ? '#d32f2f' :
-                         isSelected ? '#1976D2' : '#424242';
+        ctx.strokeStyle = hasViolation ? '#b91c1c' :
+                         isSelected ? '#1d4ed8' : '#374151';
     }
     ctx.lineWidth = isSelected ? 3 : 2;
     ctx.beginPath();
@@ -204,8 +204,8 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     if (overrideColor) {
         ctx.fillStyle = overrideColor;
     } else {
-        ctx.fillStyle = hasViolation ? '#f44336' :
-                       isSelected ? '#2196F3' : '#616161';
+        ctx.fillStyle = hasViolation ? '#dc2626' :
+                       isSelected ? '#2563eb' : '#6b7280';
     }
 
     const colAX = wall.pointA.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
@@ -231,7 +231,7 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
         const midX = (wall.pointA.x + wall.pointB.x) / 2;
         const midY = (wall.pointA.y + wall.pointB.y) / 2;
 
-        ctx.fillStyle = '#2196F3';
+        ctx.fillStyle = '#2563eb';
         ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(
@@ -283,7 +283,7 @@ function drawBuildingEnvelopes() {
 
         if (onFloorAbove) {
             ctx.globalAlpha = baseOpacity * 4;
-            ctx.strokeStyle = '#2196F3';
+            ctx.strokeStyle = '#2563eb';
             ctx.lineWidth = 1 / zoomLevel;
             ctx.setLineDash([6 / zoomLevel, 6 / zoomLevel]);
 
@@ -301,7 +301,7 @@ function drawBuildingEnvelopes() {
         }
 
         ctx.globalAlpha = baseOpacity;
-        ctx.fillStyle = '#2196F3';
+        ctx.fillStyle = '#2563eb';
 
         if (onCurrentFloor && bounceScale !== 1.0) {
             let centerX = 0, centerY = 0;
@@ -373,12 +373,12 @@ function drawVoid(v, opacity = 1.0, isGhost = false) {
 }
 
 function drawSnapIndicator(x, y) {
-    ctx.fillStyle = '#2196F3';
+    ctx.fillStyle = '#2563eb';
     ctx.beginPath();
     ctx.arc(mmToPx(x), mmToPx(y), 4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = '#2196F3';
+    ctx.strokeStyle = '#2563eb';
     ctx.lineWidth = 1;
     const size = 8;
     ctx.beginPath();
@@ -449,7 +449,7 @@ function draw() {
                 const floorsBelow = state.currentFloorId - wall.floorId;
                 const opacity = Math.max(0.1, 0.5 - (floorsBelow * 0.15));
                 const violations = wallViolations.get(idx) || [];
-                drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#90A4AE');
+                drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#9ca3af');
             }
         });
     }
@@ -465,7 +465,7 @@ function draw() {
 
                 const fillOpacity = Math.max(0.08, 0.15 - (floorsAbove * 0.04));
                 ctx.globalAlpha = fillOpacity;
-                ctx.fillStyle = hasViolation ? '#f44336' : '#B0BEC5';
+                ctx.fillStyle = hasViolation ? '#dc2626' : '#9ca3af';
 
                 ctx.beginPath();
                 ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
@@ -477,7 +477,7 @@ function draw() {
 
                 const outlineOpacity = Math.max(0.2, 0.4 - (floorsAbove * 0.1));
                 ctx.globalAlpha = outlineOpacity;
-                ctx.strokeStyle = hasViolation ? '#f44336' : '#607D8B';
+                ctx.strokeStyle = hasViolation ? '#dc2626' : '#6b7280';
                 ctx.lineWidth = 2 / zoomLevel;
                 ctx.setLineDash([8 / zoomLevel, 8 / zoomLevel]);
                 ctx.stroke();
@@ -700,7 +700,7 @@ function draw() {
 
                     restrictingWalls.add(idx);
 
-                    ctx.fillStyle = 'rgba(244, 67, 54, 0.12)';
+                    ctx.fillStyle = 'rgba(220, 38, 38, 0.12)';
 
                     const isHorizontal = Math.abs(existingWall.d.y) < Math.abs(existingWall.d.x);
                     const internalY = existingWall.pointA.y;
@@ -789,7 +789,7 @@ function draw() {
 
                 restrictingWalls.add(idx);
 
-                const zoneColor = 'rgba(244, 67, 54, 0.12)';
+                const zoneColor = 'rgba(220, 38, 38, 0.12)';
 
                 const visibleLeft = -panOffset.x / zoomLevel;
                 const visibleTop = -panOffset.y / zoomLevel;
@@ -856,8 +856,8 @@ function draw() {
             const segment = tempWall;
             const external = segment.getExternalFacePoints();
 
-            ctx.fillStyle = isRestricted ? 'rgba(244, 67, 54, 0.2)' : 'rgba(76, 175, 80, 0.2)';
-            ctx.strokeStyle = isRestricted ? '#f44336' : '#4CAF50';
+            ctx.fillStyle = isRestricted ? 'rgba(220, 38, 38, 0.2)' : 'rgba(34, 197, 94, 0.2)';
+            ctx.strokeStyle = isRestricted ? '#dc2626' : '#22c55e';
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
 
@@ -870,7 +870,7 @@ function draw() {
             ctx.fill();
             ctx.stroke();
 
-            ctx.strokeStyle = '#2196F3';
+            ctx.strokeStyle = '#2563eb';
             ctx.lineWidth = 4;
             ctx.setLineDash([]);
             ctx.beginPath();
@@ -878,7 +878,7 @@ function draw() {
             ctx.lineTo(mmToPx(segment.pointB.x), mmToPx(segment.pointB.y));
             ctx.stroke();
 
-            ctx.strokeStyle = isRestricted ? '#f44336' : '#4CAF50';
+            ctx.strokeStyle = isRestricted ? '#dc2626' : '#22c55e';
             ctx.lineWidth = 2;
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
@@ -888,7 +888,7 @@ function draw() {
             ctx.setLineDash([]);
 
             const columnSize = mmToPx(COLUMN_SIZE);
-            ctx.fillStyle = isRestricted ? 'rgba(244, 67, 54, 0.5)' : 'rgba(76, 175, 80, 0.5)';
+            ctx.fillStyle = isRestricted ? 'rgba(220, 38, 38, 0.5)' : 'rgba(34, 197, 94, 0.5)';
 
             const colAX = segment.pointA.x + (COLUMN_SIZE / 2) * segment.dNorm.x + (COLUMN_SIZE / 2) * segment.n.x;
             const colAY = segment.pointA.y + (COLUMN_SIZE / 2) * segment.dNorm.y + (COLUMN_SIZE / 2) * segment.n.y;
@@ -910,7 +910,7 @@ function draw() {
         }
 
         // Draw start and end points
-        ctx.fillStyle = isRestricted ? '#f44336' : '#4CAF50';
+        ctx.fillStyle = isRestricted ? '#dc2626' : '#22c55e';
         ctx.beginPath();
         ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 6, 0, Math.PI * 2);
         ctx.fill();
@@ -927,12 +927,12 @@ function draw() {
 
     // Show starting point when first click is placed but no preview yet
     if (drawingWall && (!tempPoint || (drawingWall.x === tempPoint.x && drawingWall.y === tempPoint.y))) {
-        ctx.fillStyle = '#4CAF50';
+        ctx.fillStyle = '#22c55e';
         ctx.beginPath();
         ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 8, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.strokeStyle = '#4CAF50';
+        ctx.strokeStyle = '#22c55e';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 12, 0, Math.PI * 2);
@@ -1092,7 +1092,7 @@ function draw() {
             tooltipY = tooltipData.mouseY - tooltipHeight - 15;
         }
 
-        ctx.fillStyle = 'rgba(244, 67, 54, 0.95)';
+        ctx.fillStyle = 'rgba(220, 38, 38, 0.95)';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 8;
         ctx.shadowOffsetX = 0;

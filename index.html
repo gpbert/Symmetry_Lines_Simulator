@@ -146,21 +146,21 @@
 
         .btn-danger {
             background: #ffffff;
-            color: #d14343;
-            border-color: #f0d0d0;
+            color: #dc2626;
+            border-color: #fecaca;
         }
 
         .btn-danger:hover {
-            background: #fef5f5;
-            border-color: #f0c0c0;
-            color: #c13333;
+            background: #fef2f2;
+            border-color: #fca5a5;
+            color: #b91c1c;
         }
-        
+
         .btn-danger.active {
-            background: #d14343;
+            background: #dc2626;
             color: #ffffff;
-            border-color: #d14343;
-            box-shadow: 0 0 0 3px rgba(209, 67, 67, 0.1);
+            border-color: #dc2626;
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
         }
         
         .btn-secondary.active {
@@ -1079,8 +1079,8 @@
 
                 if (response.ok) {
                     feedbackStatus.style.display = 'block';
-                    feedbackStatus.style.background = 'rgba(76, 175, 80, 0.1)';
-                    feedbackStatus.style.color = '#4CAF50';
+                    feedbackStatus.style.background = 'rgba(34, 197, 94, 0.1)';
+                    feedbackStatus.style.color = '#22c55e';
                     feedbackStatus.textContent = 'Thank you! Your feedback has been sent.';
 
                     feedbackForm.reset();
@@ -1094,8 +1094,8 @@
                 }
             } catch (error) {
                 feedbackStatus.style.display = 'block';
-                feedbackStatus.style.background = 'rgba(244, 67, 54, 0.1)';
-                feedbackStatus.style.color = '#f44336';
+                feedbackStatus.style.background = 'rgba(220, 38, 38, 0.1)';
+                feedbackStatus.style.color = '#dc2626';
                 feedbackStatus.textContent = 'Oops! Something went wrong. Please try again.';
             } finally {
                 submitBtn.disabled = false;
