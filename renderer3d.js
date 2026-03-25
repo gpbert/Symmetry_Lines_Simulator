@@ -539,25 +539,61 @@ function buildEnvelopes() {
         }
         shape.closePath();
 
-        const extrudeSettings = { depth: SLAB_THICKNESS, bevelEnabled: false };
+        // Build slab geometry directly in world space to avoid rotation offset issues.
+        // Create top and bottom faces from the polygon, then connect them.
+        const pts = env.polygon.map(p => ({
+            x: mmToUnits(p.x),
+            z: mmToUnits(p.y) // sim Y → Three.js Z
+        }));
+        const n = pts.length;
 
-        // Floor slab: sits below the wall base (floorY - SLAB_THICKNESS to floorY)
-        // After rotation.x = -PI/2, extrusion goes downward (local +Z → world -Y)
-        // So position.y = floorY means bottom of slab = floorY - SLAB_THICKNESS
-        const floorSlabGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        function makeSlabGeo(yBottom, yTop) {
+            // Two faces (top + bottom) + side faces
+            const positions = [];
+            const indices = [];
+
+            // Bottom face vertices: 0..n-1
+            for (let i = 0; i < n; i++) {
+                positions.push(pts[i].x, yBottom, pts[i].z);
+            }
+            // Top face vertices: n..2n-1
+            for (let i = 0; i < n; i++) {
+                positions.push(pts[i].x, yTop, pts[i].z);
+            }
+
+            // Triangulate top and bottom faces (fan from vertex 0)
+            for (let i = 1; i < n - 1; i++) {
+                // Bottom face (winding order for downward normal)
+                indices.push(0, i + 1, i);
+                // Top face (winding order for upward normal)
+                indices.push(n, n + i, n + i + 1);
+            }
+
+            // Side faces
+            for (let i = 0; i < n; i++) {
+                const i2 = (i + 1) % n;
+                // Two triangles per side quad
+                indices.push(i, i2, n + i2);
+                indices.push(i, n + i2, n + i);
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geo.setIndex(indices);
+            geo.computeVertexNormals();
+            return geo;
+        }
+
+        // Floor slab: bottom of walls (floorY - SLAB_THICKNESS to floorY)
+        const floorSlabGeo = makeSlabGeo(floorY - SLAB_THICKNESS, floorY);
         const floorSlabMesh = new THREE.Mesh(floorSlabGeo, mat);
-        floorSlabMesh.rotation.x = -Math.PI / 2;
-        floorSlabMesh.position.y = floorY;
         floorSlabMesh.castShadow = true;
         floorSlabMesh.receiveShadow = true;
         envelopeGroup.add(floorSlabMesh);
 
-        // Roof slab: sits above the wall tops (floorY + wallHeight to floorY + wallHeight + SLAB_THICKNESS)
-        // position.y = floorY + FLOOR_HEIGHT_UNITS + SLAB_THICKNESS so it extrudes down to wall top
-        const roofSlabGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        // Roof slab: top of walls (floorY + wallHeight to floorY + wallHeight + SLAB_THICKNESS)
+        const roofSlabGeo = makeSlabGeo(floorY + FLOOR_HEIGHT_UNITS, floorY + FLOOR_HEIGHT_UNITS + SLAB_THICKNESS);
         const roofSlabMesh = new THREE.Mesh(roofSlabGeo, mat);
-        roofSlabMesh.rotation.x = -Math.PI / 2;
-        roofSlabMesh.position.y = floorY + FLOOR_HEIGHT_UNITS + SLAB_THICKNESS;
         envelopeGroup.add(roofSlabMesh);
     });
 }
