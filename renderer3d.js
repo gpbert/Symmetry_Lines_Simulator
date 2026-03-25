@@ -5,7 +5,7 @@ import * as sim from './sim.js';
 import { state } from './sim.js';
 
 const {
-    GRID_SIZE_EXTERNAL, GRID_SIZE_INTERNAL, COLUMN_SIZE
+    GRID_SIZE_EXTERNAL, GRID_SIZE_INTERNAL, COLUMN_SIZE, VOID_GRID
 } = sim;
 
 // ============================================================
@@ -35,6 +35,10 @@ let envelopeGroup = null;
 let previewGroup = null;
 let gridGroup = null;
 let ghostGroup = null;
+let zoneGroup = null;
+
+// Snap cursor
+let cursorMesh = null;
 
 // Raycasting
 let groundPlane = null;
@@ -192,6 +196,8 @@ function setupScene() {
     scene.add(gridGroup);
     envelopeGroup = new THREE.Group();
     scene.add(envelopeGroup);
+    zoneGroup = new THREE.Group();
+    scene.add(zoneGroup);
     ghostGroup = new THREE.Group();
     scene.add(ghostGroup);
     wallGroup = new THREE.Group();
@@ -200,6 +206,14 @@ function setupScene() {
     scene.add(voidGroup);
     previewGroup = new THREE.Group();
     scene.add(previewGroup);
+
+    // Snap cursor indicator
+    const cursorGeo = new THREE.RingGeometry(0.1, 0.15, 16);
+    const cursorMat = new THREE.MeshBasicMaterial({ color: 0x2196F3, side: THREE.DoubleSide });
+    cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
+    cursorMesh.rotation.x = -Math.PI / 2;
+    cursorMesh.visible = false;
+    scene.add(cursorMesh);
 
     // Invisible ground plane for raycasting
     const planeGeo = new THREE.PlaneGeometry(10000, 10000);
@@ -464,6 +478,71 @@ function buildEnvelopes() {
 }
 
 // ============================================================
+// Void-mode restricted zones
+// ============================================================
+function buildZones() {
+    clearGroup(zoneGroup);
+
+    if (state.currentMode !== 'void') return;
+
+    const floorY = getFloorY(state.currentFloorId);
+    const floorWalls = state.walls.filter(w => w.floorId === state.currentFloorId);
+
+    floorWalls.forEach(wall => {
+        const isInEnvelope = sim.isWallInEnvelope(wall);
+
+        // Restricted face origin: external face for envelope walls, internal face for non-envelope
+        const faceOffset = isInEnvelope ? wall.thickness : 0;
+        // Normal direction for zone extension
+        const dirSign = isInEnvelope ? 1 : -1;
+
+        // Face corners in mm (sim space: X/Y -> Three.js X/Z)
+        const ax = wall.pointA.x + wall.n.x * faceOffset;
+        const ay = wall.pointA.y + wall.n.y * faceOffset;
+        const bx = wall.pointB.x + wall.n.x * faceOffset;
+        const by = wall.pointB.y + wall.n.y * faceOffset;
+
+        // Outward normal (in zone extension direction)
+        const nx = wall.n.x * dirSign;
+        const ny = wall.n.y * dirSign;
+
+        // Zone extends VOID_GRID mm outward from the face
+        const depth = VOID_GRID;
+
+        // Mid-point of the zone (centre of the rectangular plane)
+        const midFaceX = (ax + bx) / 2;
+        const midFaceY = (ay + by) / 2;
+        const centerX = midFaceX + nx * depth / 2;
+        const centerY = midFaceY + ny * depth / 2;
+
+        const length = wall.length;
+        const geo = new THREE.PlaneGeometry(mmToUnits(depth), mmToUnits(length));
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0xa855f7,
+            transparent: true,
+            opacity: 0.1,
+            side: THREE.DoubleSide,
+        });
+        const zoneMesh = new THREE.Mesh(geo, mat);
+        zoneMesh.rotation.x = -Math.PI / 2;
+
+        // The PlaneGeometry lies in the XY plane (before rotation.x) and after rotation
+        // sits flat in the XZ plane. Its local X axis maps to Three.js X and local Y to Three.js Z.
+        // We need it oriented along the wall direction, then offset outward.
+        // Apply wall's Y rotation so the length axis aligns with the wall.
+        zoneMesh.rotation.z = -Math.atan2(wall.d.x, wall.d.y);
+
+        zoneMesh.position.set(
+            mmToUnits(centerX),
+            floorY + 0.005,
+            mmToUnits(centerY)
+        );
+
+        zoneGroup.add(zoneMesh);
+    });
+}
+
+// ============================================================
 // Preview rendering
 // ============================================================
 function buildPreview() {
@@ -585,14 +664,30 @@ function draw() {
     if (!scene || !rendererGL) return;
 
     // Update ground plane Y to current floor
-    const floorY = getFloorY(state.currentFloorId);
-    groundPlane.position.y = floorY;
+    const currentFloorY = getFloorY(state.currentFloorId);
+    groundPlane.position.y = currentFloorY;
 
     buildGrid();
     buildEnvelopes();
+    buildZones();
     buildWalls();
     buildVoids();
     buildPreview();
+
+    // Snap cursor
+    if (cursorMesh) {
+        if (_interactionState.currentMousePos &&
+            (state.currentMode === 'draw' || state.currentMode === 'void')) {
+            cursorMesh.position.set(
+                mmToUnits(_interactionState.currentMousePos.x),
+                currentFloorY + 0.02,
+                mmToUnits(_interactionState.currentMousePos.y)
+            );
+            cursorMesh.visible = true;
+        } else {
+            cursorMesh.visible = false;
+        }
+    }
 
     // Render one frame immediately (animation loop will continue)
     if (controls) controls.update();
