@@ -539,11 +539,184 @@ function buildEnvelopes() {
         }
         shape.closePath();
 
-        // Build slab geometry directly in world space to avoid rotation offset issues.
-        // Create top and bottom faces from the polygon, then connect them.
-        const pts = env.polygon.map(p => ({
+        // Expand polygon outward so slab edges are flush with external wall faces.
+        // Each polygon edge corresponds to a wall's internal face. Offset each edge
+        // outward by the wall's thickness, then intersect adjacent offset edges.
+        const poly = env.polygon;
+        const expandedPoly = [];
+
+        for (let i = 0; i < poly.length; i++) {
+            const curr = poly[i];
+            const next = poly[(i + 1) % poly.length];
+            const prev = poly[(i - 1 + poly.length) % poly.length];
+
+            // Find the wall that corresponds to the edge curr→next
+            const edgeDx = next.x - curr.x;
+            const edgeDy = next.y - curr.y;
+            const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+
+            // Find matching wall by endpoint proximity
+            let wallThickness = 200; // default fallback
+            if (env.wallIndices) {
+                for (const wIdx of env.wallIndices) {
+                    const w = state.walls[wIdx];
+                    if (!w) continue;
+                    // Check if this wall matches the edge curr→next (either direction)
+                    const matchAB = Math.abs(w.pointA.x - curr.x) < 5 && Math.abs(w.pointA.y - curr.y) < 5 &&
+                                    Math.abs(w.pointB.x - next.x) < 5 && Math.abs(w.pointB.y - next.y) < 5;
+                    const matchBA = Math.abs(w.pointB.x - curr.x) < 5 && Math.abs(w.pointB.y - curr.y) < 5 &&
+                                    Math.abs(w.pointA.x - next.x) < 5 && Math.abs(w.pointA.y - next.y) < 5;
+                    if (matchAB || matchBA) {
+                        wallThickness = w.thickness;
+                        break;
+                    }
+                }
+            }
+
+            // Outward normal for this edge (perpendicular, pointing outward from polygon)
+            // For a CCW polygon, outward normal of edge (dx,dy) is (dy, -dx) normalized
+            // For CW, it's (-dy, dx). We determine winding by checking cross product.
+            const edgeNx = edgeDy / (edgeLen || 1);
+            const edgeNy = -edgeDx / (edgeLen || 1);
+
+            // Similarly for the previous edge (prev→curr)
+            const prevDx = curr.x - prev.x;
+            const prevDy = curr.y - prev.y;
+            const prevLen = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+            const prevNx = prevDy / (prevLen || 1);
+            const prevNy = -prevDx / (prevLen || 1);
+
+            // Find previous edge's wall thickness
+            let prevWallThickness = 200;
+            if (env.wallIndices) {
+                for (const wIdx of env.wallIndices) {
+                    const w = state.walls[wIdx];
+                    if (!w) continue;
+                    const matchAB = Math.abs(w.pointA.x - prev.x) < 5 && Math.abs(w.pointA.y - prev.y) < 5 &&
+                                    Math.abs(w.pointB.x - curr.x) < 5 && Math.abs(w.pointB.y - curr.y) < 5;
+                    const matchBA = Math.abs(w.pointB.x - prev.x) < 5 && Math.abs(w.pointB.y - prev.y) < 5 &&
+                                    Math.abs(w.pointA.x - curr.x) < 5 && Math.abs(w.pointA.y - curr.y) < 5;
+                    if (matchAB || matchBA) {
+                        prevWallThickness = w.thickness;
+                        break;
+                    }
+                }
+            }
+
+            // Offset the two edges and find their intersection at this corner
+            // Offset edge prev→curr by prevWallThickness in direction (prevNx, prevNy)
+            // Offset edge curr→next by wallThickness in direction (edgeNx, edgeNy)
+            // Line 1: prev_offset to curr_offset (prev edge shifted)
+            const p1x = curr.x + prevNx * prevWallThickness;
+            const p1y = curr.y + prevNy * prevWallThickness;
+            const d1x = prevDx;
+            const d1y = prevDy;
+
+            // Line 2: curr_offset to next_offset (current edge shifted)
+            const p2x = curr.x + edgeNx * wallThickness;
+            const p2y = curr.y + edgeNy * wallThickness;
+            const d2x = edgeDx;
+            const d2y = edgeDy;
+
+            // Intersect: p1 + t*d1 = p2 + s*d2
+            const denom = d1x * d2y - d1y * d2x;
+            if (Math.abs(denom) < 0.001) {
+                // Parallel edges — just offset the corner
+                expandedPoly.push({
+                    x: curr.x + edgeNx * wallThickness,
+                    y: curr.y + edgeNy * wallThickness
+                });
+            } else {
+                const t = ((p2x - p1x) * d2y - (p2y - p1y) * d2x) / denom;
+                expandedPoly.push({
+                    x: p1x + t * d1x,
+                    y: p1y + t * d1y
+                });
+            }
+        }
+
+        // Check if the expansion went inward (polygon winding might be CW)
+        // Compare area of original vs expanded — if expanded is smaller, flip normals
+        function polyArea(pts) {
+            let area = 0;
+            for (let i = 0; i < pts.length; i++) {
+                const j = (i + 1) % pts.length;
+                area += pts[i].x * pts[j].y;
+                area -= pts[j].x * pts[i].y;
+            }
+            return area / 2;
+        }
+        const origArea = Math.abs(polyArea(poly));
+        const expArea = Math.abs(polyArea(expandedPoly));
+
+        let finalPoly;
+        if (expArea < origArea) {
+            // Expansion went inward — flip by negating the offset
+            // Redo with negated normals
+            const flippedPoly = [];
+            for (let i = 0; i < poly.length; i++) {
+                const curr = poly[i];
+                const next = poly[(i + 1) % poly.length];
+                const prev = poly[(i - 1 + poly.length) % poly.length];
+
+                const edgeDx = next.x - curr.x;
+                const edgeDy = next.y - curr.y;
+                const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+                const edgeNx = -edgeDy / (edgeLen || 1);
+                const edgeNy = edgeDx / (edgeLen || 1);
+
+                let wallThickness = 200;
+                if (env.wallIndices) {
+                    for (const wIdx of env.wallIndices) {
+                        const w = state.walls[wIdx];
+                        if (!w) continue;
+                        const matchAB = Math.abs(w.pointA.x - curr.x) < 5 && Math.abs(w.pointA.y - curr.y) < 5 &&
+                                        Math.abs(w.pointB.x - next.x) < 5 && Math.abs(w.pointB.y - next.y) < 5;
+                        const matchBA = Math.abs(w.pointB.x - curr.x) < 5 && Math.abs(w.pointB.y - curr.y) < 5 &&
+                                        Math.abs(w.pointA.x - next.x) < 5 && Math.abs(w.pointA.y - next.y) < 5;
+                        if (matchAB || matchBA) { wallThickness = w.thickness; break; }
+                    }
+                }
+
+                const prevDx = curr.x - prev.x;
+                const prevDy = curr.y - prev.y;
+                const prevLen = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+                const prevNx = -prevDy / (prevLen || 1);
+                const prevNy = prevDx / (prevLen || 1);
+
+                let prevWallThickness = 200;
+                if (env.wallIndices) {
+                    for (const wIdx of env.wallIndices) {
+                        const w = state.walls[wIdx];
+                        if (!w) continue;
+                        const matchAB = Math.abs(w.pointA.x - prev.x) < 5 && Math.abs(w.pointA.y - prev.y) < 5 &&
+                                        Math.abs(w.pointB.x - curr.x) < 5 && Math.abs(w.pointB.y - curr.y) < 5;
+                        const matchBA = Math.abs(w.pointB.x - prev.x) < 5 && Math.abs(w.pointB.y - prev.y) < 5 &&
+                                        Math.abs(w.pointA.x - curr.x) < 5 && Math.abs(w.pointA.y - curr.y) < 5;
+                        if (matchAB || matchBA) { prevWallThickness = w.thickness; break; }
+                    }
+                }
+
+                const p1x = curr.x + prevNx * prevWallThickness;
+                const p1y = curr.y + prevNy * prevWallThickness;
+                const p2x = curr.x + edgeNx * wallThickness;
+                const p2y = curr.y + edgeNy * wallThickness;
+                const denom = prevDx * edgeDy - prevDy * edgeDx;
+                if (Math.abs(denom) < 0.001) {
+                    flippedPoly.push({ x: curr.x + edgeNx * wallThickness, y: curr.y + edgeNy * wallThickness });
+                } else {
+                    const t = ((p2x - p1x) * edgeDy - (p2y - p1y) * edgeDx) / denom;
+                    flippedPoly.push({ x: p1x + t * prevDx, y: p1y + t * prevDy });
+                }
+            }
+            finalPoly = flippedPoly;
+        } else {
+            finalPoly = expandedPoly;
+        }
+
+        const pts = finalPoly.map(p => ({
             x: mmToUnits(p.x),
-            z: mmToUnits(p.y) // sim Y → Three.js Z
+            z: mmToUnits(p.y)
         }));
         const n = pts.length;
 
