@@ -1629,12 +1629,17 @@ export function computeWallExtensions() {
 
                 const extPt = { x: targetX, y: pt.y };
 
-                // Column: aligned with the vertical wall's internal face (same X as V's column),
-                // sitting right next to V's column along the internal face line
+                // Column: at V's internal face X, offset along Y to sit BESIDE V's column.
+                // V's column is offset toward V's body (away from connection point).
+                // H's column goes on the opposite side of the connection point.
                 const connectPt = dA < TOL ? other.pointA : other.pointB;
+                const otherBodyPt = dA < TOL ? other.pointB : other.pointA;
+                const towardVBodyY = Math.sign(otherBodyPt.y - connectPt.y);
+                // V's column center is at connectPt.y + towardVBodyY * COLUMN_SIZE/2
+                // H's column goes on the other side: connectPt.y - towardVBodyY * COLUMN_SIZE/2
                 const col = {
                     x: connectPt.x,
-                    y: pt.y
+                    y: connectPt.y - towardVBodyY * COLUMN_SIZE / 2
                 };
 
                 if (ep === 'A') { ext.extA = extPt; ext.colA = col; }
