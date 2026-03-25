@@ -1589,3 +1589,105 @@ export function validateAllWalls() {
 
     return allViolations;
 }
+
+// ============================================================
+// Wall corner extension computation (rendering-only)
+// ============================================================
+export function computeWallExtensions() {
+    // For each wall endpoint, check if a perpendicular wall connects there.
+    // If so, extend this wall's visual endpoint to the perpendicular wall's external face.
+    // Returns a Map<wallIndex, {extA: {x,y} or null, extB: {x,y} or null, colA: {x,y} or null, colB: {x,y} or null}>
+
+    const extensions = new Map();
+    const CONNECT_TOLERANCE = 5; // mm
+
+    state.walls.forEach((wall, idx) => {
+        const ext = { extA: null, extB: null, colA: null, colB: null };
+
+        // Check endpoint A
+        state.walls.forEach((other, otherIdx) => {
+            if (idx === otherIdx) return;
+            if (wall.floorId !== other.floorId) return;
+            if (!wall.isPerpendicularTo(other)) return;
+
+            const distToA = Math.sqrt(
+                Math.pow(wall.pointA.x - other.pointA.x, 2) +
+                Math.pow(wall.pointA.y - other.pointA.y, 2)
+            );
+            const distToB = Math.sqrt(
+                Math.pow(wall.pointA.x - other.pointB.x, 2) +
+                Math.pow(wall.pointA.y - other.pointB.y, 2)
+            );
+
+            if (distToA < CONNECT_TOLERANCE || distToB < CONNECT_TOLERANCE) {
+                const wallIsHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+
+                if (wallIsHorizontal) {
+                    const externalX = other.pointA.x + other.n.x * other.thickness;
+                    const dirToExternal = externalX - wall.pointA.x;
+                    const dirAlongWall = wall.pointB.x - wall.pointA.x;
+                    if (Math.sign(dirToExternal) !== Math.sign(dirAlongWall) || Math.abs(dirToExternal) < 1) {
+                        ext.extA = { x: externalX, y: wall.pointA.y };
+                        const otherConnectPt = distToA < CONNECT_TOLERANCE ? other.pointA : other.pointB;
+                        ext.colA = { x: otherConnectPt.x, y: wall.pointA.y };
+                    }
+                } else {
+                    const externalY = other.pointA.y + other.n.y * other.thickness;
+                    const dirToExternal = externalY - wall.pointA.y;
+                    const dirAlongWall = wall.pointB.y - wall.pointA.y;
+                    if (Math.sign(dirToExternal) !== Math.sign(dirAlongWall) || Math.abs(dirToExternal) < 1) {
+                        ext.extA = { x: wall.pointA.x, y: externalY };
+                        const otherConnectPt = distToA < CONNECT_TOLERANCE ? other.pointA : other.pointB;
+                        ext.colA = { x: wall.pointA.x, y: otherConnectPt.y };
+                    }
+                }
+            }
+        });
+
+        // Check endpoint B
+        state.walls.forEach((other, otherIdx) => {
+            if (idx === otherIdx) return;
+            if (wall.floorId !== other.floorId) return;
+            if (!wall.isPerpendicularTo(other)) return;
+
+            const distToA = Math.sqrt(
+                Math.pow(wall.pointB.x - other.pointA.x, 2) +
+                Math.pow(wall.pointB.y - other.pointA.y, 2)
+            );
+            const distToB = Math.sqrt(
+                Math.pow(wall.pointB.x - other.pointB.x, 2) +
+                Math.pow(wall.pointB.y - other.pointB.y, 2)
+            );
+
+            if (distToA < CONNECT_TOLERANCE || distToB < CONNECT_TOLERANCE) {
+                const wallIsHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+
+                if (wallIsHorizontal) {
+                    const externalX = other.pointA.x + other.n.x * other.thickness;
+                    const dirToExternal = externalX - wall.pointB.x;
+                    const dirAlongWall = wall.pointA.x - wall.pointB.x;
+                    if (Math.sign(dirToExternal) !== Math.sign(dirAlongWall) || Math.abs(dirToExternal) < 1) {
+                        ext.extB = { x: externalX, y: wall.pointB.y };
+                        const otherConnectPt = distToA < CONNECT_TOLERANCE ? other.pointA : other.pointB;
+                        ext.colB = { x: otherConnectPt.x, y: wall.pointB.y };
+                    }
+                } else {
+                    const externalY = other.pointA.y + other.n.y * other.thickness;
+                    const dirToExternal = externalY - wall.pointB.y;
+                    const dirAlongWall = wall.pointA.y - wall.pointB.y;
+                    if (Math.sign(dirToExternal) !== Math.sign(dirAlongWall) || Math.abs(dirToExternal) < 1) {
+                        ext.extB = { x: wall.pointB.x, y: externalY };
+                        const otherConnectPt = distToA < CONNECT_TOLERANCE ? other.pointA : other.pointB;
+                        ext.colB = { x: wall.pointB.x, y: otherConnectPt.y };
+                    }
+                }
+            }
+        });
+
+        if (ext.extA || ext.extB) {
+            extensions.set(idx, ext);
+        }
+    });
+
+    return extensions;
+}
