@@ -657,62 +657,41 @@
     <script type="module">
         import * as sim from './sim.js';
         import { Wall, state } from './sim.js';
+        import { renderer2D } from './renderer2d.js';
+        import { initInteraction, bindToCanvas, interactionState, resetDrawingState } from './interaction.js';
+
         const {
-            GRID_SIZE_EXTERNAL, GRID_SIZE_INTERNAL, COLUMN_SIZE,
-            MIN_WALL_LENGTH, WALL_LENGTH_GRID, MIN_DISTANCE_PARALLEL,
-            MIN_DISTANCE_OPPOSITE, VOID_GRID, MIN_VOID_SIZE, MAX_HISTORY
+            GRID_SIZE_EXTERNAL, MIN_WALL_LENGTH, MIN_VOID_SIZE
         } = sim;
 
-        const MM_TO_PX = 0.15; // Scale factor for visualization (1mm = 0.15px)
+        // ============================================================
+        // Drawing toast state (stays in index.html — UI concern)
+        // ============================================================
+        let drawingToastElement = null;
 
-        // Local UI state (not extracted to sim.js)
-        let drawingVoid = null; // Void being drawn {startX, startY}
-        let resizingVoid = null; // {void, handle} — handle is 'n','s','e','w','ne','nw','se','sw'
-        let originalVoidState = null; // For undo during resize
-        let drawingWall = null;
-        let tempPoint = null;
-        let wallFlipped = false; // Track if wall is flipped during drawing
-        let drawingToastElement = null; // Track the current drawing toast
-
-        // Pan and Zoom state
-        let panOffset = { x: 0, y: 0 };
-        let zoomLevel = 1.0;
-        let isPanning = false;
-        let lastPanPos = { x: 0, y: 0 };
-
-        // Move state
-        let isDragging = false;
-        let dragStartPos = null;
-        let originalWallPos = null;
-
-        // Wall stretching state
-        let stretchingWall = null;
-        let stretchingEndpoint = null; // 'A' or 'B'
-        let originalStretchPoint = null;
-
+        // ============================================================
         // Toast notification system
+        // ============================================================
         function showToast(message, type = 'error', duration = 4000) {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            
+
             toast.innerHTML = `
                 <div class="toast-content">
                     <p class="toast-message">${message}</p>
                 </div>
             `;
-            
+
             container.appendChild(toast);
-            
-            // Auto-remove after duration
+
             setTimeout(() => {
                 toast.classList.add('hiding');
                 setTimeout(() => {
                     container.removeChild(toast);
-                }, 300); // Match animation duration
+                }, 300);
             }, duration);
-            
-            // Allow clicking to dismiss
+
             toast.addEventListener('click', () => {
                 toast.classList.add('hiding');
                 setTimeout(() => {
@@ -722,14 +701,11 @@
                 }, 300);
             });
         }
-        
-        // Update or create a persistent toast while drawing (errors only)
+
         function updateDrawingToast(isRestricted, restriction, wallLength) {
             const container = document.getElementById('toast-container');
-            
+
             if (isRestricted) {
-                // Show error toast
-                // Use the reason if provided, otherwise show distance
                 let message;
                 if (restriction.zone.reason) {
                     message = `Cannot place here. ${restriction.zone.reason}`;
@@ -737,8 +713,7 @@
                     message = `Cannot place here. Min distance: ${restriction.zone.distance / 10}cm`;
                 }
                 const type = 'error';
-                
-                // If toast exists, update it
+
                 if (drawingToastElement && container.contains(drawingToastElement)) {
                     drawingToastElement.className = `toast ${type}`;
                     const messageEl = drawingToastElement.querySelector('.toast-message');
@@ -746,26 +721,23 @@
                         messageEl.textContent = message;
                     }
                 } else {
-                    // Create new toast
                     const toast = document.createElement('div');
                     toast.className = `toast ${type}`;
-                    
+
                     toast.innerHTML = `
                         <div class="toast-content">
                             <p class="toast-message">${message}</p>
                         </div>
                     `;
-                    
+
                     container.appendChild(toast);
                     drawingToastElement = toast;
                 }
             } else {
-                // Valid wall - clear any existing error toast
                 clearDrawingToast();
             }
         }
-        
-        // Clear the drawing toast
+
         function clearDrawingToast() {
             if (drawingToastElement) {
                 const container = document.getElementById('toast-container');
@@ -780,7 +752,9 @@
             }
         }
 
-        // Undo/redo wrappers (delegate to sim.js with UI callbacks)
+        // ============================================================
+        // Undo / Redo wrappers
+        // ============================================================
         function undo() {
             sim.undo((result) => {
                 if (result === 'empty') {
@@ -798,7 +772,7 @@
                     }
                 });
                 updateUI();
-                draw();
+                renderer2D.draw();
                 showToast('Undo', 'info', 2000);
             });
         }
@@ -820,7 +794,7 @@
                     }
                 });
                 updateUI();
-                draw();
+                renderer2D.draw();
                 showToast('Redo', 'info', 2000);
             });
         }
@@ -842,2058 +816,161 @@
         // Wrapper for validateAllWalls that also triggers draw
         function validateAllWalls() {
             sim.validateAllWalls();
-            draw();
+            renderer2D.draw();
         }
 
-        // Canvas variables
-        let canvas, ctx;
-        
+        // ============================================================
         // Initialize everything when DOM is ready
+        // ============================================================
         window.addEventListener('DOMContentLoaded', function() {
-            canvas = document.getElementById('mainCanvas');
-            if (!canvas) {
-                console.error('Canvas element not found!');
-                return;
-            }
-            
-            ctx = canvas.getContext('2d');
-            
-            function resizeCanvas() {
-                const container = canvas.parentElement;
-                canvas.width = container.clientWidth;
-                canvas.height = container.clientHeight;
-                if (canvas.width > 0 && canvas.height > 0) {
-                    draw();
-                } else {
-                    console.error('Canvas has zero dimensions!');
-                }
-            }
-            
-            window.addEventListener('resize', resizeCanvas);
-            
+            // Init renderer
+            renderer2D.init(document.querySelector('.canvas-container'));
+            renderer2D.setInteractionState(interactionState);
+            renderer2D.activate();
+
+            // Attach undo/redo functions so interaction.js keyboard handler can call them
+            const updateUIWithUndoRedo = Object.assign(updateUI, { _undo: undo, _redo: redo });
+
+            // Init interaction handlers
+            initInteraction(() => renderer2D, {
+                showToast,
+                updateUI: updateUIWithUndoRedo,
+                updateBuildingEnvelopes,
+                validateAllWalls,
+                clearDrawingToast,
+                updateDrawingToast,
+            });
+            bindToCanvas(renderer2D.getCanvas());
+
             // Give the browser time to layout the DOM
             setTimeout(() => {
-                resizeCanvas();
-                setupEventListeners();
+                renderer2D._onResize();
+                setupSidebarListeners();
             }, 100);
         });
 
-        // (Wall class, grid snapping, and helpers are now in sim.js)
+        // ============================================================
+        // Sidebar / UI event listeners (remain in index.html)
+        // ============================================================
+        function setupSidebarListeners() {
+        const canvas = renderer2D.getCanvas();
 
-        function mmToPx(mm) {
-            return mm * MM_TO_PX;
-        }
-
-        function pxToMm(px) {
-            return px / MM_TO_PX;
-        }
-
-        function pxSnapToGrid(px, gridSize = GRID_SIZE_EXTERNAL) {
-            const mm = pxToMm(px);
-            const snappedMm = sim.snapToGrid(mm, gridSize);
-            return mmToPx(snappedMm);
-        }
-
-        // Drawing functions
-        function drawGrid() {
-            if (!ctx || !canvas) {
-                console.error('Canvas not initialized in drawGrid!');
-                return;
-            }
-            
-            // Grid is always shown
-            
-            const gridStepExternal = mmToPx(GRID_SIZE_EXTERNAL);
-            const gridStepInternal = mmToPx(GRID_SIZE_INTERNAL);
-
-            // Calculate visible world bounds (in pixels) accounting for pan/zoom
-            const visibleLeft = -panOffset.x / zoomLevel;
-            const visibleTop = -panOffset.y / zoomLevel;
-            const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
-            const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
-            
-            // Round to grid boundaries
-            const startX = Math.floor(visibleLeft / gridStepExternal) * gridStepExternal;
-            const endX = Math.ceil(visibleRight / gridStepExternal) * gridStepExternal;
-            const startY = Math.floor(visibleTop / gridStepExternal) * gridStepExternal;
-            const endY = Math.ceil(visibleBottom / gridStepExternal) * gridStepExternal;
-
-            // Draw 300mm grid (external) - DARK, thicker lines
-            ctx.strokeStyle = '#999999';
-            ctx.lineWidth = 2 / zoomLevel; // Adjust line width for zoom
-            for (let x = startX; x <= endX; x += gridStepExternal) {
-                ctx.beginPath();
-                ctx.moveTo(x, visibleTop);
-                ctx.lineTo(x, visibleBottom);
-                ctx.stroke();
-            }
-            for (let y = startY; y <= endY; y += gridStepExternal) {
-                ctx.beginPath();
-                ctx.moveTo(visibleLeft, y);
-                ctx.lineTo(visibleRight, y);
-                ctx.stroke();
-            }
-
-            // Draw 100mm grid (internal) - lighter lines
-            ctx.strokeStyle = '#dddddd';
-            ctx.lineWidth = 0.5 / zoomLevel; // Adjust line width for zoom
-            
-            const startXInternal = Math.floor(visibleLeft / gridStepInternal) * gridStepInternal;
-            const endXInternal = Math.ceil(visibleRight / gridStepInternal) * gridStepInternal;
-            const startYInternal = Math.floor(visibleTop / gridStepInternal) * gridStepInternal;
-            const endYInternal = Math.ceil(visibleBottom / gridStepInternal) * gridStepInternal;
-            
-            for (let x = startXInternal; x <= endXInternal; x += gridStepInternal) {
-                // Skip if it's on a 300mm line
-                if (Math.abs(x % gridStepExternal) < 0.5) continue;
-                ctx.beginPath();
-                ctx.moveTo(x, visibleTop);
-                ctx.lineTo(x, visibleBottom);
-                ctx.stroke();
-            }
-            for (let y = startYInternal; y <= endYInternal; y += gridStepInternal) {
-                // Skip if it's on a 300mm line
-                if (Math.abs(y % gridStepExternal) < 0.5) continue;
-                ctx.beginPath();
-                ctx.moveTo(visibleLeft, y);
-                ctx.lineTo(visibleRight, y);
-                ctx.stroke();
-            }
-        }
-
-        // sim.getRestrictedZones is now in sim.js
-
-        function drawRestrictedZones() {
-            // Restricted zones are always shown
-            
-            state.walls.forEach(wall => {
-                const zones = sim.getRestrictedZones(wall);
-                
-                zones.forEach(zone => {
-                    ctx.fillStyle = zone.type === 'opposite' ? 
-                        'rgba(244, 67, 54, 0.1)' :  // Red for opposite (1200mm)
-                        'rgba(255, 152, 0, 0.08)';   // Orange for parallel (600mm)
-                    
-                    ctx.fillRect(
-                        mmToPx(zone.x1),
-                        mmToPx(zone.y1),
-                        mmToPx(zone.x2 - zone.x1),
-                        mmToPx(zone.y2 - zone.y1)
-                    );
-
-                    // Draw border
-                    ctx.strokeStyle = zone.type === 'opposite' ? 
-                        'rgba(244, 67, 54, 0.3)' : 
-                        'rgba(255, 152, 0, 0.2)';
-                    ctx.lineWidth = 1;
-                    ctx.setLineDash([4, 4]);
-                    ctx.strokeRect(
-                        mmToPx(zone.x1),
-                        mmToPx(zone.y1),
-                        mmToPx(zone.x2 - zone.x1),
-                        mmToPx(zone.y2 - zone.y1)
-                    );
-                    ctx.setLineDash([]);
-                });
-            });
-        }
-
-        // (Envelope detection, slab systems, and sim.isWallInRestrictedZone are now in sim.js)
-
-        function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, overrideColor = null) {
-            const hasViolation = violations.length > 0;
-            const external = wall.getExternalFacePoints();
-            
-            // Apply opacity for adjacent floor state.walls
-            ctx.globalAlpha = opacity;
-
-            // Draw wall body (from internal face A-B to external face)
-            if (overrideColor) {
-                ctx.fillStyle = overrideColor.replace(')', ', 0.15)').replace('rgb', 'rgba');
-                ctx.strokeStyle = overrideColor;
-            } else {
-                ctx.fillStyle = hasViolation ? 'rgba(244, 67, 54, 0.2)' : 
-                               isSelected ? 'rgba(33, 150, 243, 0.3)' : 'rgba(158, 158, 158, 0.3)';
-                ctx.strokeStyle = hasViolation ? '#f44336' :
-                                 isSelected ? '#2196F3' : '#757575';
-            }
-            ctx.lineWidth = isSelected ? 3 : 2;
-
-            ctx.beginPath();
-            ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-            ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
-            ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-            ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-
-            // Draw INTERNAL face line (BLUE - grid-aligned side with columns)
-            // This is at points A and B
-            if (overrideColor) {
-                ctx.strokeStyle = overrideColor;
-            } else {
-                ctx.strokeStyle = '#2196F3';
-            }
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-            ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
-            ctx.stroke();
-
-            // Draw external face line (thinner, darker)
-            if (overrideColor) {
-                ctx.strokeStyle = overrideColor;
-            } else {
-                ctx.strokeStyle = hasViolation ? '#d32f2f' :
-                                 isSelected ? '#1976D2' : '#424242';
-            }
-            ctx.lineWidth = isSelected ? 3 : 2;
-            ctx.beginPath();
-            ctx.moveTo(mmToPx(external.a.x), mmToPx(external.a.y));
-            ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-            ctx.stroke();
-
-            // Draw steel columns (10x10cm squares at A and B on the BLUE LINE)
-            const columnSize = mmToPx(COLUMN_SIZE);
-            if (overrideColor) {
-                ctx.fillStyle = overrideColor;
-            } else {
-                ctx.fillStyle = hasViolation ? '#f44336' :
-                               isSelected ? '#2196F3' : '#616161';
-            }
-
-            // Column at A (on internal face - blue line)
-            // Position column in grid cell, aligned to internal corner
-            // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
-            const colAX = wall.pointA.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
-            const colAY = wall.pointA.y + (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
-            ctx.fillRect(
-                mmToPx(colAX) - columnSize / 2,
-                mmToPx(colAY) - columnSize / 2,
-                columnSize,
-                columnSize
-            );
-
-            // Column at B (on internal face - blue line)
-            // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
-            const colBX = wall.pointB.x - (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
-            const colBY = wall.pointB.y - (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
-            ctx.fillRect(
-                mmToPx(colBX) - columnSize / 2,
-                mmToPx(colBY) - columnSize / 2,
-                columnSize,
-                columnSize
-            );
-
-            // Draw dimensions
-            if (isSelected) {
-                const midX = (wall.pointA.x + wall.pointB.x) / 2;
-                const midY = (wall.pointA.y + wall.pointB.y) / 2;
-                
-                ctx.fillStyle = '#2196F3';
-                ctx.font = 'bold 14px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(
-                    `${Math.round(wall.length / 10)}cm (${wall.thickness / 10}cm thick)`,
-                    mmToPx(midX),
-                    mmToPx(midY) - 15
-                );
-            }
-            
-            // Reset global alpha
-            ctx.globalAlpha = 1.0;
-        }
-
-        // (sim.getEndpointNearPoint, sim.getVoidAtPoint, sim.getVoidResizeHandle are now in sim.js)
-
-        // Draw building envelopes (waffle slabs) with cross-floor visibility
-        function drawBuildingEnvelopes() {
-            const showLevelsBelow = document.getElementById('showOtherFloors').checked;
-            const showLevelsAbove = document.getElementById('showLevelsAbove')?.checked;
-            
-            state.buildingEnvelopes.forEach(envelope => {
-                const onCurrentFloor = envelope.floorId === state.currentFloorId;
-                const onFloorBelow = envelope.floorId < state.currentFloorId;
-                const onFloorAbove = envelope.floorId > state.currentFloorId;
-                
-                // Skip if not on current floor and respective checkbox is unchecked
-                if (onFloorBelow && !showLevelsBelow) return;
-                if (onFloorAbove && !showLevelsAbove) return;
-                
-                // Calculate opacity and animation
-                let baseOpacity = 0.05; // Very faint blue for current floor
-                let bounceScale = 1.0;
-                
-                if (onFloorBelow) {
-                    const floorsBelow = state.currentFloorId - envelope.floorId;
-                    baseOpacity = Math.max(0.02, 0.04 - (floorsBelow * 0.01));
-                } else if (onFloorAbove) {
-                    const floorsAbove = envelope.floorId - state.currentFloorId;
-                    baseOpacity = Math.max(0.02, 0.04 - (floorsAbove * 0.01));
-                }
-                
-                // Bounce animation for new envelopes (only on current floor)
-                if (onCurrentFloor && state.newEnvelopeTimestamp) {
-                    const timeSinceAppear = Date.now() - state.newEnvelopeTimestamp;
-                    const animationDuration = 500; // ms
-                    
-                    if (timeSinceAppear < animationDuration) {
-                        const progress = timeSinceAppear / animationDuration;
-                        // Gentle bounce effect - reduced intensity
-                        bounceScale = 1 + Math.sin(progress * Math.PI) * 0.04 * (1 - progress);
-                    } else {
-                        state.newEnvelopeTimestamp = null; // Animation complete
-                    }
-                }
-                
-                ctx.save();
-                
-                // For above state.floors, draw dashed outline
-                if (onFloorAbove) {
-                    ctx.globalAlpha = baseOpacity * 4; // Higher opacity for outline
-                    ctx.strokeStyle = '#2196F3';
-                    ctx.lineWidth = 1 / zoomLevel;
-                    ctx.setLineDash([6 / zoomLevel, 6 / zoomLevel]);
-                    
-                    ctx.beginPath();
-                    envelope.polygon.forEach((point, i) => {
-                        if (i === 0) {
-                            ctx.moveTo(mmToPx(point.x), mmToPx(point.y));
-                        } else {
-                            ctx.lineTo(mmToPx(point.x), mmToPx(point.y));
-                        }
-                    });
-                    ctx.closePath();
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
-                
-                // Draw filled polygon
-                ctx.globalAlpha = baseOpacity;
-                ctx.fillStyle = '#2196F3'; // Blue color
-                
-                // Apply bounce scale (only for current floor)
-                if (onCurrentFloor && bounceScale !== 1.0) {
-                    // Calculate center of polygon
-                    let centerX = 0, centerY = 0;
-                    envelope.polygon.forEach(p => {
-                        centerX += p.x;
-                        centerY += p.y;
-                    });
-                    centerX /= envelope.polygon.length;
-                    centerY /= envelope.polygon.length;
-                    
-                    ctx.translate(mmToPx(centerX), mmToPx(centerY));
-                    ctx.scale(bounceScale, bounceScale);
-                    ctx.translate(-mmToPx(centerX), -mmToPx(centerY));
-                }
-                
-                ctx.beginPath();
-                envelope.polygon.forEach((point, i) => {
-                    if (i === 0) {
-                        ctx.moveTo(mmToPx(point.x), mmToPx(point.y));
-                    } else {
-                        ctx.lineTo(mmToPx(point.x), mmToPx(point.y));
-                    }
-                });
-                ctx.closePath();
-                ctx.fill();
-                
-                ctx.restore();
-            });
-            
-            // Request animation frame if bounce animation is active
-            if (state.newEnvelopeTimestamp && (Date.now() - state.newEnvelopeTimestamp < 500)) {
-                requestAnimationFrame(draw);
-            }
-        }
-        
-        function drawVoid(v, opacity = 1.0, isGhost = false) {
-            const x = mmToPx(v.x);
-            const y = mmToPx(v.y);
-            const w = mmToPx(v.width);
-            const h = mmToPx(v.height);
-            ctx.save();
-            if (isGhost) {
-                ctx.strokeStyle = `rgba(220, 38, 38, ${opacity * 0.5})`;
-                ctx.lineWidth = 1 / zoomLevel;
-                ctx.setLineDash([4 / zoomLevel, 4 / zoomLevel]);
-                ctx.strokeRect(x, y, w, h);
-            } else {
-                ctx.fillStyle = `rgba(220, 38, 38, ${opacity * 0.08})`;
-                ctx.fillRect(x, y, w, h);
-                ctx.strokeStyle = `rgba(220, 38, 38, ${opacity * 0.3})`;
-                ctx.lineWidth = 1 / zoomLevel;
-                ctx.beginPath();
-                const step = 12 / zoomLevel;
-                ctx.save();
-                ctx.rect(x, y, w, h);
-                ctx.clip();
-                for (let i = -Math.max(w, h); i < Math.max(w, h) * 2; i += step) {
-                    ctx.moveTo(x + i, y);
-                    ctx.lineTo(x + i + Math.max(w, h), y + Math.max(w, h));
-                }
-                ctx.stroke();
-                ctx.restore();
-                const isSelected = state.selectedVoid === v;
-                ctx.strokeStyle = isSelected ? 'rgba(37, 99, 235, 0.9)' : `rgba(220, 38, 38, ${opacity * 0.6})`;
-                ctx.lineWidth = isSelected ? 2 / zoomLevel : 1.5 / zoomLevel;
-                ctx.setLineDash(isSelected ? [6 / zoomLevel, 3 / zoomLevel] : []);
-                ctx.strokeRect(x, y, w, h);
-            }
-            ctx.restore();
-        }
-
-        function draw() {
-            if (!ctx || !canvas) {
-                console.error('Canvas not initialized in draw!');
-                return;
-            }
-            
-            // Clear and fill background (before transformation)
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Apply pan and zoom transformation
-            ctx.setTransform(zoomLevel, 0, 0, zoomLevel, panOffset.x, panOffset.y);
-            
-            drawGrid();
-            
-            // Draw building envelopes (waffle slabs) - BEFORE state.walls so state.walls appear on top
-            drawBuildingEnvelopes();
-
-            // Draw envelope angle violation markers
-            state.envelopeAngleViolations
-                .filter(v => v.floorId === state.currentFloorId)
-                .forEach(v => {
-                    ctx.fillStyle = 'rgba(220, 38, 38, 0.8)';
-                    ctx.beginPath();
-                    ctx.arc(mmToPx(v.point.x), mmToPx(v.point.y), 8 / zoomLevel, 0, Math.PI * 2);
-                    ctx.fill();
-                });
-
-            // Get violations for state.walls (needed for rendering below/above level state.walls)
-            const wallViolations = new Map();
-            state.walls.forEach((wall, idx) => {
-                if (wall.floorId === state.currentFloorId || 
-                    wall.floorId === state.currentFloorId - 1 || 
-                    wall.floorId === state.currentFloorId + 1) {
-                    wallViolations.set(idx, sim.validateWall(wall, idx));
-                }
-            });
-
-            // Draw state.walls from levels below if enabled
-            if (document.getElementById('showOtherFloors').checked) {
-                state.walls.forEach((wall, idx) => {
-                    // Only show levels below the current level
-                    if (wall.floorId < state.currentFloorId) {
-                        // Calculate opacity based on distance from current level
-                        // 1 level below = 0.4 opacity, 2 levels = 0.25, 3 levels = 0.15, etc.
-                        const floorsBelow = state.currentFloorId - wall.floorId;
-                        const opacity = Math.max(0.1, 0.5 - (floorsBelow * 0.15));
-                        
-                        // Get violations for this wall to show red color if needed
-                        const violations = wallViolations.get(idx) || [];
-                        
-                        // Lighter gray color for trace (unless has violations)
-                        drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#90A4AE');
-                    }
-                });
-            }
-            
-            // Draw state.walls from levels above if enabled (draw early so they don't get covered)
-            const showLevelsAboveCheckbox = document.getElementById('showLevelsAbove');
-            if (showLevelsAboveCheckbox && showLevelsAboveCheckbox.checked) {
-                state.walls.forEach((wall, idx) => {
-                    // Only show levels above the current level
-                    if (wall.floorId > state.currentFloorId) {
-                        // Calculate opacity based on distance from current level
-                        const floorsAbove = wall.floorId - state.currentFloorId;
-                        
-                        // Check for violations
-                        const violations = wallViolations.get(idx) || [];
-                        const hasViolation = violations.some(v => v.type === 'error');
-                        
-                        // Get wall faces
-                        const external = wall.getExternalFacePoints();
-                        
-                        // Draw filled rectangle with very faint light grey (or red if violations)
-                        // Use much lower opacity for fill (0.15 for 1 level above)
-                        const fillOpacity = Math.max(0.08, 0.15 - (floorsAbove * 0.04));
-                        ctx.globalAlpha = fillOpacity;
-                        ctx.fillStyle = hasViolation ? '#f44336' : '#B0BEC5'; // Red if violations, light blue-grey otherwise
-                        
-                        ctx.beginPath();
-                        ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-                        ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
-                        ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-                        ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
-                        ctx.closePath();
-                        ctx.fill();
-                        
-                        // Draw dashed outline with higher opacity for visibility
-                        const outlineOpacity = Math.max(0.2, 0.4 - (floorsAbove * 0.1));
-                        ctx.globalAlpha = outlineOpacity;
-                        ctx.strokeStyle = hasViolation ? '#f44336' : '#607D8B'; // Red if violations, darker blue-grey otherwise
-                        ctx.lineWidth = 2 / zoomLevel;
-                        ctx.setLineDash([8 / zoomLevel, 8 / zoomLevel]);
-                        ctx.stroke();
-                        
-                        ctx.setLineDash([]);
-                        ctx.globalAlpha = 1.0;
-                    }
-                });
-            }
-            
-            // Draw state.voids from other state.floors (ghost)
-            if (document.getElementById('showOtherFloors').checked ||
-                document.getElementById('showLevelsAbove').checked) {
-                state.voids.forEach(v => {
-                    if (v.floorId !== state.currentFloorId) {
-                        const floorDiff = Math.abs(v.floorId - state.currentFloorId);
-                        if (floorDiff <= 3) {
-                            const ghostOpacity = floorDiff === 1 ? 0.4 : floorDiff === 2 ? 0.25 : 0.15;
-                            drawVoid(v, ghostOpacity, true);
-                        }
-                    }
-                });
-            }
-
-            // Track state.walls generating restriction zones (for pulsing effect while drawing)
-            const restrictingWalls = new Set();
-
-            // Get current level state.walls
-            const currentFloorWalls = state.walls.filter(w => w.floorId === state.currentFloorId);
-
-            // Draw current level state.walls
-            state.walls.forEach((wall, idx) => {
-                if (wall.floorId === state.currentFloorId) {
-                    const isSelected = state.selectedWalls.includes(wall);
-                    const violations = wallViolations.get(idx) || [];
-                    drawWall(wall, isSelected, violations);
-                }
-            });
-
-            // Draw void proximity restricted face zones (purple) when in void mode
-            if (state.currentMode === 'void') {
-                const floorWalls = state.walls.filter(w => w.floorId === state.currentFloorId);
-                floorWalls.forEach(wall => {
-                    const isInEnvelope = sim.isWallInEnvelope(wall);
-                    const faceOffset = isInEnvelope ? wall.thickness : 0;
-                    const zoneDepth = VOID_GRID;
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
-                    const ax = wall.pointA.x + wall.n.x * faceOffset;
-                    const ay = wall.pointA.y + wall.n.y * faceOffset;
-                    const bx = wall.pointB.x + wall.n.x * faceOffset;
-                    const by = wall.pointB.y + wall.n.y * faceOffset;
-                    const nx = wall.n.x * (isInEnvelope ? 1 : -1);
-                    const ny = wall.n.y * (isInEnvelope ? 1 : -1);
-                    ctx.beginPath();
-                    ctx.moveTo(mmToPx(ax), mmToPx(ay));
-                    ctx.lineTo(mmToPx(bx), mmToPx(by));
-                    ctx.lineTo(mmToPx(bx + nx * zoneDepth), mmToPx(by + ny * zoneDepth));
-                    ctx.lineTo(mmToPx(ax + nx * zoneDepth), mmToPx(ay + ny * zoneDepth));
-                    ctx.closePath();
-                    ctx.fill();
-                    // Hatch pattern
-                    ctx.strokeStyle = 'rgba(168, 85, 247, 0.15)';
-                    ctx.lineWidth = 1 / zoomLevel;
-                    const step = 10 / zoomLevel;
-                    ctx.beginPath();
-                    ctx.save();
-                    ctx.clip();
-                    const minPx = Math.min(mmToPx(ax), mmToPx(bx), mmToPx(ax + nx * zoneDepth), mmToPx(bx + nx * zoneDepth));
-                    const maxPx = Math.max(mmToPx(ax), mmToPx(bx), mmToPx(ax + nx * zoneDepth), mmToPx(bx + nx * zoneDepth));
-                    const minPy = Math.min(mmToPx(ay), mmToPx(by), mmToPx(ay + ny * zoneDepth), mmToPx(by + ny * zoneDepth));
-                    const maxPy = Math.max(mmToPx(ay), mmToPx(by), mmToPx(ay + ny * zoneDepth), mmToPx(by + ny * zoneDepth));
-                    for (let i = minPx - (maxPy - minPy); i < maxPx + (maxPy - minPy); i += step) {
-                        ctx.moveTo(i, minPy);
-                        ctx.lineTo(i + (maxPy - minPy), maxPy);
-                    }
-                    ctx.stroke();
-                    ctx.restore();
-                    ctx.restore();
-                });
-            }
-
-            // Draw current floor state.voids
-            state.voids.filter(v => v.floorId === state.currentFloorId).forEach(v => {
-                drawVoid(v);
-            });
-
-            // Draw resize handles for selected void
-            if (state.selectedVoid && state.selectedVoid.floorId === state.currentFloorId) {
-                const v = state.selectedVoid;
-                const handleSize = 6 / zoomLevel;
-                ctx.fillStyle = '#2563eb';
-                const handles = [
-                    { x: v.x, y: v.y, cursor: 'nw' },
-                    { x: v.x + v.width / 2, y: v.y, cursor: 'n' },
-                    { x: v.x + v.width, y: v.y, cursor: 'ne' },
-                    { x: v.x + v.width, y: v.y + v.height / 2, cursor: 'e' },
-                    { x: v.x + v.width, y: v.y + v.height, cursor: 'se' },
-                    { x: v.x + v.width / 2, y: v.y + v.height, cursor: 's' },
-                    { x: v.x, y: v.y + v.height, cursor: 'sw' },
-                    { x: v.x, y: v.y + v.height / 2, cursor: 'w' },
-                ];
-                handles.forEach(h => {
-                    ctx.beginPath();
-                    ctx.rect(mmToPx(h.x) - handleSize / 2, mmToPx(h.y) - handleSize / 2, handleSize, handleSize);
-                    ctx.fill();
-                });
-            }
-
-            // Draw endpoint handles in select mode (only for selected state.walls)
-            if (state.currentMode === 'select' && state.selectedWalls.length > 0) {
-                state.selectedWalls.forEach((wall) => {
-                    if (wall.floorId === state.currentFloorId) {
-                        ctx.save();
-                        
-                        // Check if mouse is near endpoints for hover highlighting
-                        let nearA = false;
-                        let nearB = false;
-                        if (currentMousePos) {
-                            const worldThreshold = 20 / zoomLevel;
-                            const distA = Math.sqrt(
-                                Math.pow(currentMousePos.x - wall.pointA.x, 2) + 
-                                Math.pow(currentMousePos.y - wall.pointA.y, 2)
-                            );
-                            const distB = Math.sqrt(
-                                Math.pow(currentMousePos.x - wall.pointB.x, 2) + 
-                                Math.pow(currentMousePos.y - wall.pointB.y, 2)
-                            );
-                            nearA = distA < worldThreshold;
-                            nearB = distB < worldThreshold;
-                        }
-                        
-                        // Draw point A handle
-                        ctx.beginPath();
-                        ctx.arc(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y), 8 / zoomLevel, 0, Math.PI * 2);
-                        ctx.fillStyle = nearA ? '#2563eb' : 'rgba(37, 99, 235, 0.5)';
-                        ctx.fill();
-                        ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 2 / zoomLevel;
-                        ctx.stroke();
-                        
-                        // Draw point B handle
-                        ctx.beginPath();
-                        ctx.arc(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y), 8 / zoomLevel, 0, Math.PI * 2);
-                        ctx.fillStyle = nearB ? '#2563eb' : 'rgba(37, 99, 235, 0.5)';
-                        ctx.fill();
-                        ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 2 / zoomLevel;
-                        ctx.stroke();
-                        
-                        ctx.restore();
-                    }
-                });
-            }
-
-            // Draw temporary wall while drawing
-            if (drawingWall && tempPoint && (drawingWall.x !== tempPoint.x || drawingWall.y !== tempPoint.y)) {
-                // Apply flip by swapping start/end if flipped
-                const startX = wallFlipped ? tempPoint.x : drawingWall.x;
-                const startY = wallFlipped ? tempPoint.y : drawingWall.y;
-                const endX = wallFlipped ? drawingWall.x : tempPoint.x;
-                const endY = wallFlipped ? drawingWall.y : tempPoint.y;
-                
-                const tempWall = new Wall(
-                    startX,
-                    startY,
-                    endX,
-                    endY,
-                    parseInt(document.getElementById('wallThickness').value),
-                    2700, // Default height
-                    null, // No groupId for preview
-                    state.currentFloorId // Preview on current floor
-                );
-                
-                // Draw dynamic restriction zones based on preview wall's orientation
-                if (tempWall.length > 0) {
-                    state.walls.forEach((existingWall, idx) => {
-                        // Check state.walls on current floor and adjacent state.floors (consecutive levels)
-                        const floorDiff = Math.abs(existingWall.floorId - state.currentFloorId);
-                        if (floorDiff > 1) {
-                            return;
-                        }
-                        
-                        // Only draw zones for parallel state.walls
-                        const isParallel = existingWall.isParallelTo(tempWall);
-                        if (!isParallel) return;
-                        
-                        // Check slab system membership for zone drawing decisions
-                        let previewIsInEnvelope = false;
-                        let existingIsInEnvelope = false;
-                        
-                        // Slab-based restrictions: only affects orphan vs envelope interactions
-                        if (state.slabRestrictionsEnabled) {
-                            const predictedSystem = sim.getPredictedSlabSystemForPreviewWall(tempWall, true); // Check cursor position
-                            const existingWallSlabs = sim.getWallSlabSystem(existingWall);
-                            previewIsInEnvelope = predictedSystem !== null;
-                            
-                            // Also check if existing wall is beneath an envelope on adjacent floor
-                            const existingPredictedSystem = sim.getPredictedSlabSystemForPreviewWall(existingWall);
-                            existingIsInEnvelope = existingWallSlabs.length > 0 || existingPredictedSystem !== null;
-                            
-                            // ONLY skip if one is orphan and the other is in an envelope
-                            if (previewIsInEnvelope && !existingIsInEnvelope) {
-                                // Preview in envelope, existing is orphan - skip
-                                return;
-                            } else if (!previewIsInEnvelope && existingIsInEnvelope) {
-                                // Preview is orphan, existing in envelope - skip
-                                return;
-                            }
-                            // All other cases: show zones normally
-                        }
-                        
-                        // Calculate preview midpoint (used for both special case and general case)
-                        const previewMidX = (tempWall.pointA.x + tempWall.pointB.x) / 2;
-                        const previewMidY = (tempWall.pointA.y + tempWall.pointB.y) / 2;
-                        
-                        // Check if state.walls are aligned (same line)
-                        const dist = tempWall.distanceToWall(existingWall);
-                        if (dist < 10) {
-                            // On same line - check orientation and thickness
-                            const sameOrientation = tempWall.sameOrientation(existingWall);
-                            const sameThickness = tempWall.thickness === existingWall.thickness;
-                            
-                            // Only skip (no restriction) if BOTH orientation AND thickness match
-                            if (sameOrientation && sameThickness) {
-                                return; // Valid aligned wall
-                            }
-                            
-                            // Same line with mismatched properties
-                            if (sameOrientation && !sameThickness) {
-                                // Same orientation but different thickness
-                                // This is invalid for cross-floor overlaps
-                                const onDifferentFloor = existingWall.floorId !== state.currentFloorId;
-                                if (onDifferentFloor) {
-                                    // Mark wall as restricting and return (no zone rectangle needed)
-                                    restrictingWalls.add(idx);
-                                    return;
-                                }
-                                // For same floor, continue to show distance-based restriction zone below
-                            }
-                            
-                            // Same line but OPPOSITE orientation - INVALID at 0mm!
-                            // When state.walls are on the same line with opposite orientation,
-                            // moving perpendicular creates "facing away" configuration = 600mm minimum
-                            const requiredDistance = MIN_DISTANCE_PARALLEL; // 600mm (internal faces point away)
-                            
-                            // Mark this wall as generating a restriction zone
-                            restrictingWalls.add(idx);
-                            
-                            ctx.fillStyle = 'rgba(244, 67, 54, 0.12)'; // Red
-                            
-                            const isHorizontal = Math.abs(existingWall.d.y) < Math.abs(existingWall.d.x);
-                            const internalY = existingWall.pointA.y;
-                            const internalX = existingWall.pointA.x;
-                            
-                            const visibleLeft = (-panOffset.x) / zoomLevel;
-                            const visibleTop = (-panOffset.y) / zoomLevel;
-                            const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
-                            const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
-                            const margin = 100000;
-                            const infiniteLeft = pxToMm(visibleLeft - margin);
-                            const infiniteRight = pxToMm(visibleRight + margin);
-                            const infiniteTop = pxToMm(visibleTop - margin);
-                            const infiniteBottom = pxToMm(visibleBottom + margin);
-                            
-                            if (isHorizontal) {
-                                // Determine if preview is above or below existing wall
-                                if (previewMidY > internalY) {
-                                    // Preview is below - draw zone below
-                                    ctx.fillRect(
-                                        mmToPx(infiniteLeft),
-                                        mmToPx(internalY),
-                                        mmToPx(infiniteRight - infiniteLeft),
-                                        mmToPx(requiredDistance)
-                                    );
-                                } else {
-                                    // Preview is above - draw zone above
-                                    ctx.fillRect(
-                                        mmToPx(infiniteLeft),
-                                        mmToPx(internalY - requiredDistance),
-                                        mmToPx(infiniteRight - infiniteLeft),
-                                        mmToPx(requiredDistance)
-                                    );
-                                }
-                            } else {
-                                // Determine if preview is left or right of existing wall
-                                if (previewMidX > internalX) {
-                                    // Preview is to the right - draw zone right
-                                    ctx.fillRect(
-                                        mmToPx(internalX),
-                                        mmToPx(infiniteTop),
-                                        mmToPx(requiredDistance),
-                                        mmToPx(infiniteBottom - infiniteTop)
-                                    );
-                                } else {
-                                    // Preview is to the left - draw zone left
-                                    ctx.fillRect(
-                                        mmToPx(internalX - requiredDistance),
-                                        mmToPx(infiniteTop),
-                                        mmToPx(requiredDistance),
-                                        mmToPx(infiniteBottom - infiniteTop)
-                                    );
-                                }
-                            }
-                            return; // Done drawing zone for this wall
-                        }
-                        
-                        // Determine which side of the existing wall the preview wall is on
-                        // (previewMidX/Y already calculated above)
-                        
-                        // Vector from existing wall's internal face to preview wall midpoint
-                        const toPreview = {
-                            x: previewMidX - existingWall.pointA.x,
-                            y: previewMidY - existingWall.pointA.y
-                        };
-                        
-                        // Skip if state.walls are perpendicular (no parallel distance rule)
-                        if (!tempWall.isParallelTo(existingWall)) {
-                            return;
-                        }
-                        
-                        // Calculate actual distance between state.walls
-                        const actualDistance = tempWall.distanceToWall(existingWall);
-                        
-                        // Determine the required distance based on orientation
-                        const orientationDot = tempWall.n.x * existingWall.n.x + tempWall.n.y * existingWall.n.y;
-                        let requiredDistance;
-                        
-                        // Check if state.walls have opposite normals
-                        if (orientationDot < -0.9) {
-                            // Walls are anti-parallel. Now check if internal faces are facing TOWARD each other
-                            // Vector from existing wall to preview wall
-                            const toPreviewWall = {
-                                x: previewMidX - existingWall.pointA.x,
-                                y: previewMidY - existingWall.pointA.y
-                            };
-                            
-                            // If existing wall's normal points toward preview (dot > 0), 
-                            // and preview wall's normal points toward existing (opposite direction),
-                            // then internal faces are facing each other = 1200mm rule
-                            const existingToPreview = toPreviewWall.x * existingWall.n.x + toPreviewWall.y * existingWall.n.y;
-                            
-                            if (existingToPreview > 0) {
-                                // Internal faces facing each other: 1200mm
-                                requiredDistance = MIN_DISTANCE_OPPOSITE;
-                            } else {
-                                // Internal faces facing away from each other: 600mm
-                                requiredDistance = MIN_DISTANCE_PARALLEL;
-                            }
-                        } else {
-                            // Same orientation or not truly anti-parallel: 600mm
-                            requiredDistance = MIN_DISTANCE_PARALLEL;
-                        }
-                        
-                        // Show zone only if close enough to violate distance rules
-                        // (Slab system membership only affects orphan skipping, which is handled above)
-                        if (actualDistance >= requiredDistance - 2) {
-                            return; // Skip - not close enough to show zone
-                        }
-                        
-                        // Mark this wall as generating a restriction zone
-                        restrictingWalls.add(idx);
-                        
-                        // All zones are RED
-                        const zoneColor = 'rgba(244, 67, 54, 0.12)';
-                        
-                        // Calculate truly infinite bounds
-                        const visibleLeft = -panOffset.x / zoomLevel;
-                        const visibleTop = -panOffset.y / zoomLevel;
-                        const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
-                        const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
-                        const margin = 100000;
-                        const infiniteLeft = pxToMm(visibleLeft - margin);
-                        const infiniteRight = pxToMm(visibleRight + margin);
-                        const infiniteTop = pxToMm(visibleTop - margin);
-                        const infiniteBottom = pxToMm(visibleBottom + margin);
-                        
-                        // Determine which side of the existing wall the preview is on
-                        // using the normal vector of the existing wall
-                        const sideDot = toPreview.x * existingWall.n.x + toPreview.y * existingWall.n.y;
-                        
-                        // sideDot > 0: preview is on the internal side (direction of normal)
-                        // sideDot < 0: preview is on the external side (opposite to normal)
-                        
-                        const isHorizontal = Math.abs(existingWall.d.y) < Math.abs(existingWall.d.x);
-                        
-                        ctx.fillStyle = zoneColor;
-                        
-                        if (isHorizontal) {
-                            // Horizontal wall - zone extends vertically
-                            // Internal face is at pointA.y
-                            // Normal points perpendicular to the wall (up or down)
-                            const internalY = existingWall.pointA.y;
-                            
-                            // Determine zone direction based on where preview is relative to internal face
-                            // For horizontal state.walls, check if preview is above or below
-                            if (previewMidY > internalY) {
-                                // Preview is below internal face - zone extends downward
-                                ctx.fillRect(
-                                    mmToPx(infiniteLeft),
-                                    mmToPx(internalY),
-                                    mmToPx(infiniteRight - infiniteLeft),
-                                    mmToPx(requiredDistance)
-                                );
-                            } else {
-                                // Preview is above internal face - zone extends upward
-                                ctx.fillRect(
-                                    mmToPx(infiniteLeft),
-                                    mmToPx(internalY - requiredDistance),
-                                    mmToPx(infiniteRight - infiniteLeft),
-                                    mmToPx(requiredDistance)
-                                );
-                            }
-                        } else {
-                            // Vertical wall - zone extends horizontally
-                            // Internal face is at pointA.x
-                            // Normal points perpendicular to the wall (left or right)
-                            const internalX = existingWall.pointA.x;
-                            
-                            // Determine zone direction based on where preview is relative to internal face
-                            // For vertical state.walls, check if preview is left or right
-                            if (previewMidX > internalX) {
-                                // Preview is to the right of internal face - zone extends right
-                                ctx.fillRect(
-                                    mmToPx(internalX),
-                                    mmToPx(infiniteTop),
-                                    mmToPx(requiredDistance),
-                                    mmToPx(infiniteBottom - infiniteTop)
-                                );
-                            } else {
-                                // Preview is to the left of internal face - zone extends left
-                                ctx.fillRect(
-                                    mmToPx(internalX - requiredDistance),
-                                    mmToPx(infiniteTop),
-                                    mmToPx(requiredDistance),
-                                    mmToPx(infiniteBottom - infiniteTop)
-                                );
-                            }
-                        }
-                    });
-                }
-                
-                // Check if wall is in restricted zone
-                const restriction = sim.isWallInRestrictedZone(tempWall);
-                const isRestricted = restriction.restricted;
-                
-                // Draw the preview wall
-                {
-                    const segment = tempWall;
-                    const external = segment.getExternalFacePoints();
-                
-                    // Draw full wall preview (semi-transparent)
-                    ctx.fillStyle = isRestricted ? 'rgba(244, 67, 54, 0.2)' : 'rgba(76, 175, 80, 0.2)';
-                    ctx.strokeStyle = isRestricted ? '#f44336' : '#4CAF50';
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([]);
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(mmToPx(segment.pointA.x), mmToPx(segment.pointA.y));
-                    ctx.lineTo(mmToPx(segment.pointB.x), mmToPx(segment.pointB.y));
-                    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-                    ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-
-                    // Draw INTERNAL face (BLUE - grid-aligned side with columns)
-                    // This is at points A and B (the grid line)
-                    ctx.strokeStyle = '#2196F3';
-                    ctx.lineWidth = 4;
-                    ctx.setLineDash([]);
-                    ctx.beginPath();
-                    ctx.moveTo(mmToPx(segment.pointA.x), mmToPx(segment.pointA.y));
-                    ctx.lineTo(mmToPx(segment.pointB.x), mmToPx(segment.pointB.y));
-                    ctx.stroke();
-
-                    // Draw external face (dashed)
-                    ctx.strokeStyle = isRestricted ? '#f44336' : '#4CAF50';
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([5, 5]);
-                    ctx.beginPath();
-                    ctx.moveTo(mmToPx(external.a.x), mmToPx(external.a.y));
-                    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-
-                    // Draw steel column previews at A and B (on the BLUE LINE)
-                    const columnSize = mmToPx(COLUMN_SIZE);
-                    ctx.fillStyle = isRestricted ? 'rgba(244, 67, 54, 0.5)' : 'rgba(76, 175, 80, 0.5)';
-                    
-                    // Column at A (on internal face - blue line)
-                    // Position column in grid cell, aligned to internal corner
-                    // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
-                    const colAX = segment.pointA.x + (COLUMN_SIZE / 2) * segment.dNorm.x + (COLUMN_SIZE / 2) * segment.n.x;
-                    const colAY = segment.pointA.y + (COLUMN_SIZE / 2) * segment.dNorm.y + (COLUMN_SIZE / 2) * segment.n.y;
-                    ctx.fillRect(
-                        mmToPx(colAX) - columnSize / 2,
-                        mmToPx(colAY) - columnSize / 2,
-                        columnSize,
-                        columnSize
-                    );
-                    
-                    // Column at B (on internal face - blue line)
-                    // Offset along wall direction (inward by 50mm) and perpendicular (inward by 50mm)
-                    const colBX = segment.pointB.x - (COLUMN_SIZE / 2) * segment.dNorm.x + (COLUMN_SIZE / 2) * segment.n.x;
-                    const colBY = segment.pointB.y - (COLUMN_SIZE / 2) * segment.dNorm.y + (COLUMN_SIZE / 2) * segment.n.y;
-                    ctx.fillRect(
-                        mmToPx(colBX) - columnSize / 2,
-                        mmToPx(colBY) - columnSize / 2,
-                        columnSize,
-                        columnSize
-                    );
-
-                }
-
-                // Draw start and end points
-                ctx.fillStyle = isRestricted ? '#f44336' : '#4CAF50';
-                ctx.beginPath();
-                ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 6, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.beginPath();
-                ctx.arc(mmToPx(tempPoint.x), mmToPx(tempPoint.y), 6, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Update drawing toast with current status
-                updateDrawingToast(isRestricted, restriction, tempWall.length);
-            }
-
-            // Show starting point when first click is placed but no preview yet
-            if (drawingWall && (!tempPoint || (drawingWall.x === tempPoint.x && drawingWall.y === tempPoint.y))) {
-                ctx.fillStyle = '#4CAF50';
-                ctx.beginPath();
-                ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 8, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Draw pulsing ring
-                ctx.strokeStyle = '#4CAF50';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 12, 0, Math.PI * 2);
-                ctx.stroke();
-            }
-            
-            // Draw void preview
-            if (state.currentMode === 'void' && drawingVoid && tempPoint) {
-                const previewX = Math.min(drawingVoid.startX, tempPoint.x);
-                const previewY = Math.min(drawingVoid.startY, tempPoint.y);
-                const previewW = Math.abs(tempPoint.x - drawingVoid.startX);
-                const previewH = Math.abs(tempPoint.y - drawingVoid.startY);
-                const tooSmall = previewW < MIN_VOID_SIZE || previewH < MIN_VOID_SIZE;
-                const overlaps = state.voids.some(v =>
-                    v.floorId === state.currentFloorId &&
-                    previewX < v.x + v.width && previewX + previewW > v.x &&
-                    previewY < v.y + v.height && previewY + previewH > v.y
-                );
-                const isInvalid = tooSmall || overlaps;
-                ctx.save();
-                const px = mmToPx(previewX);
-                const py = mmToPx(previewY);
-                const pw = mmToPx(previewW);
-                const ph = mmToPx(previewH);
-                ctx.fillStyle = isInvalid ? 'rgba(220, 38, 38, 0.1)' : 'rgba(34, 197, 94, 0.1)';
-                ctx.fillRect(px, py, pw, ph);
-                ctx.strokeStyle = isInvalid ? 'rgba(220, 38, 38, 0.6)' : 'rgba(34, 197, 94, 0.6)';
-                ctx.lineWidth = 1.5 / zoomLevel;
-                ctx.setLineDash([6 / zoomLevel, 3 / zoomLevel]);
-                ctx.strokeRect(px, py, pw, ph);
-                ctx.restore();
-                if (previewW > 0 && previewH > 0) {
-                    ctx.fillStyle = isInvalid ? '#dc2626' : '#16a34a';
-                    ctx.font = `${11 / zoomLevel}px Inter, sans-serif`;
-                    ctx.textAlign = 'center';
-                    ctx.fillText(
-                        `${Math.round(previewW / 10)}cm x ${Math.round(previewH / 10)}cm`,
-                        px + pw / 2, py + ph / 2
-                    );
-                }
-            }
-
-            // Show snap indicator when hovering and ready to start drawing
-            if (currentMousePos && state.currentMode === 'draw' && !drawingWall) {
-                drawSnapIndicator(currentMousePos.x, currentMousePos.y);
-            }
-            
-            // Detect hover for tooltips and pulsing (but don't render yet)
-            let hoveredWallWithErrors = null;
-            let tooltipData = null;
-            
-            if (currentMousePos && state.currentMode !== 'draw') {
-                let hoveredWall = null;
-                let hoveredWallIndex = null;
-                
-                // Find wall under mouse
-                state.walls.forEach((wall, idx) => {
-                    if (Math.abs(wall.floorId - state.currentFloorId) > 1) return;
-                    
-                    const external = wall.getExternalFacePoints();
-                    ctx.beginPath();
-                    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-                    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
-                    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-                    ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
-                    ctx.closePath();
-                    
-                    if (ctx.isPointInPath(mmToPx(currentMousePos.x), mmToPx(currentMousePos.y))) {
-                        hoveredWall = wall;
-                        hoveredWallIndex = idx;
-                    }
-                });
-                
-                // Check for violations and prepare tooltip data
-                if (hoveredWall && hoveredWallIndex !== null && currentMouseScreenPos) {
-                    const violations = wallViolations.get(hoveredWallIndex) || sim.validateWall(hoveredWall, hoveredWallIndex);
-                    const errors = violations.filter(v => v.type === 'error');
-                    
-                    if (errors.length > 0) {
-                        // Add conflicting state.walls to pulsing set
-                        errors.forEach(error => {
-                            if (error.conflictingWallIndex !== undefined) {
-                                restrictingWalls.add(error.conflictingWallIndex);
-                            }
-                        });
-                        
-                        // Prepare tooltip data for rendering later
-                        const tooltipLines = errors.map(e => e.message || String(e)).filter(msg => msg);
-                        if (tooltipLines.length > 0) {
-                            tooltipData = {
-                                lines: tooltipLines,
-                                mouseX: currentMouseScreenPos.x,
-                                mouseY: currentMouseScreenPos.y
-                            };
-                        }
-                    }
-                }
-            }
-            
-            // Draw pulsing red overlay on state.walls generating restriction zones (after hover detection)
-            if (restrictingWalls.size > 0) {
-                // Calculate pulse opacity using sine wave (0.3 to 0.6 range)
-                const time = Date.now() / 1000; // Convert to seconds
-                const pulseOpacity = 0.45 + Math.sin(time * 3) * 0.15; // 3 Hz frequency
-                
-                ctx.globalAlpha = pulseOpacity;
-                ctx.fillStyle = '#ef4444'; // Red color
-                
-                restrictingWalls.forEach(wallIdx => {
-                    const wall = state.walls[wallIdx];
-                    if (!wall) return;
-                    
-                    // Only pulse state.walls on current floor or adjacent state.floors
-                    if (Math.abs(wall.floorId - state.currentFloorId) > 1) return;
-                    
-                    const external = wall.getExternalFacePoints();
-                    
-                    // Draw filled rectangle overlay
-                    ctx.beginPath();
-                    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
-                    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
-                    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
-                    ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
-                    ctx.closePath();
-                    ctx.fill();
-                });
-                
-                ctx.globalAlpha = 1.0;
-                
-                // Request animation frame to continue pulsing
-                requestAnimationFrame(draw);
-            }
-            
-            // Render tooltip at the very end (after all other drawing is complete)
-            if (tooltipData) {
-                // Save current state and completely reset to screen coordinates
-                ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.globalAlpha = 1.0;
-                ctx.shadowColor = 'transparent';
-                ctx.shadowBlur = 0;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 0;
-                ctx.setLineDash([]);
-                
-                const padding = 16;
-                const lineHeight = 20;
-                const fontSize = 14;
-                
-                // CRITICAL: Set font properties BEFORE measuring
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'top';
-                ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
-                
-                // Calculate dimensions with proper measurement
-                const widths = tooltipData.lines.map(line => ctx.measureText(line).width);
-                const maxWidth = Math.max(...widths);
-                const tooltipWidth = Math.ceil(maxWidth) + padding * 2;
-                const tooltipHeight = tooltipData.lines.length * lineHeight + padding * 2 - 4;
-                
-                // Position (stay on screen)
-                let tooltipX = tooltipData.mouseX + 15;
-                let tooltipY = tooltipData.mouseY + 15;
-                
-                if (tooltipX + tooltipWidth > canvas.width) {
-                    tooltipX = tooltipData.mouseX - tooltipWidth - 15;
-                }
-                if (tooltipY + tooltipHeight > canvas.height) {
-                    tooltipY = tooltipData.mouseY - tooltipHeight - 15;
-                }
-                
-                // Draw background
-                ctx.fillStyle = 'rgba(244, 67, 54, 0.95)';
-                ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-                ctx.shadowBlur = 8;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 2;
-                
-                const radius = 6;
-                ctx.beginPath();
-                ctx.moveTo(tooltipX + radius, tooltipY);
-                ctx.lineTo(tooltipX + tooltipWidth - radius, tooltipY);
-                ctx.quadraticCurveTo(tooltipX + tooltipWidth, tooltipY, tooltipX + tooltipWidth, tooltipY + radius);
-                ctx.lineTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight - radius);
-                ctx.quadraticCurveTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight, tooltipX + tooltipWidth - radius, tooltipY + tooltipHeight);
-                ctx.lineTo(tooltipX + radius, tooltipY + tooltipHeight);
-                ctx.quadraticCurveTo(tooltipX, tooltipY + tooltipHeight, tooltipX, tooltipY + tooltipHeight - radius);
-                ctx.lineTo(tooltipX, tooltipY + radius);
-                ctx.quadraticCurveTo(tooltipX, tooltipY, tooltipX + radius, tooltipY);
-                ctx.closePath();
-                ctx.fill();
-                
-                // Reset shadow
-                ctx.shadowColor = 'transparent';
-                ctx.shadowBlur = 0;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 0;
-                
-                // Draw text (font already set from measurement)
-                ctx.fillStyle = '#ffffff';
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'top';
-                tooltipData.lines.forEach((line, i) => {
-                    ctx.fillText(line, tooltipX + padding, tooltipY + padding + i * lineHeight);
-                });
-                
-                // Restore state
-                ctx.restore();
-            }
-        }
-
-        // (sim.validateWall, sim.isWallInEnvelope, sim.validateVoidWallProximity, validateEnvelopeAngles, validateAllWalls are now in sim.js)
-
-        function displayViolations(allViolations) {
-            // This function is deprecated - validation results panel was removed
-            return;
-            
-            if (allViolations.length === 0) {
-                violationsList.innerHTML = '<div class="no-violations">✓ All rules satisfied!</div>';
-                return;
-            }
-
-            let html = '';
-            allViolations.forEach(({ wallIndex, violations }) => {
-                violations.forEach(v => {
-                    html += `
-                        <div class="violation-item ${v.type}">
-                            <div class="violation-title">Wall ${wallIndex + 1}: ${v.type.toUpperCase()}</div>
-                            <div>${v.message}</div>
-                        </div>
-                    `;
-                });
-            });
-
-            violationsList.innerHTML = html;
-        }
-
-        // Mouse handling
-        let currentMousePos = null;
-        let currentMouseScreenPos = null; // Mouse position in screen coordinates
-
-        function getMousePosition(e) {
-            const rect = canvas.getBoundingClientRect();
-            // Get mouse position in canvas pixels
-            const canvasX = e.clientX - rect.left;
-            const canvasY = e.clientY - rect.top;
-            
-            // Store screen position for tooltips
-            currentMouseScreenPos = { x: canvasX, y: canvasY };
-            
-            // Transform from screen space to world space (inverse of pan/zoom)
-            const worldX = (canvasX - panOffset.x) / zoomLevel;
-            const worldY = (canvasY - panOffset.y) / zoomLevel;
-            
-            // Convert to mm
-            let x = pxToMm(worldX);
-            let y = pxToMm(worldY);
-
-            // Always snap to 300mm external grid
-            x = sim.snapToGrid(x, GRID_SIZE_EXTERNAL);
-            y = sim.snapToGrid(y, GRID_SIZE_EXTERNAL);
-
-            return { x, y };
-        }
-
-        function drawSnapIndicator(x, y) {
-            // Draw a small circle at snap point
-            ctx.fillStyle = '#2196F3';
-            ctx.beginPath();
-            ctx.arc(mmToPx(x), mmToPx(y), 4, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Draw crosshair
-            ctx.strokeStyle = '#2196F3';
-            ctx.lineWidth = 1;
-            const size = 8;
-            ctx.beginPath();
-            ctx.moveTo(mmToPx(x) - size, mmToPx(y));
-            ctx.lineTo(mmToPx(x) + size, mmToPx(y));
-            ctx.moveTo(mmToPx(x), mmToPx(y) - size);
-            ctx.lineTo(mmToPx(x), mmToPx(y) + size);
-            ctx.stroke();
-        }
-
-        function setupEventListeners() {
-        // Pan and Zoom event listeners
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            
-            // Zoom in/out (reduced sensitivity)
-            const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
-            const newZoom = Math.max(0.5, Math.min(2, zoomLevel * zoomFactor));
-            
-            // Zoom toward mouse position
-            const worldXBefore = (mouseX - panOffset.x) / zoomLevel;
-            const worldYBefore = (mouseY - panOffset.y) / zoomLevel;
-            
-            zoomLevel = newZoom;
-            
-            panOffset.x = mouseX - worldXBefore * zoomLevel;
-            panOffset.y = mouseY - worldYBefore * zoomLevel;
-            
-            draw();
-        }, { passive: false });
-        
-        canvas.addEventListener('mouseup', (e) => {
-            if (isPanning) {
-                isPanning = false;
-                canvas.style.cursor = state.currentMode === 'draw' ? 'crosshair' : 'pointer';
-            }
-            
-            if (stretchingWall) {
-                // Check minimum length
-                if (stretchingWall.length < MIN_WALL_LENGTH) {
-                    // Restore original position
-                    stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
-                    stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
-                    stretchingWall.updateVectors();
-                    showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
-                } else {
-                    // Check if the stretched wall passes validation
-                    const stretchIdx = state.walls.indexOf(stretchingWall);
-                    const violations = sim.validateWall(stretchingWall, stretchIdx);
-                    if (violations.length > 0 && violations.some(v => v.type === 'error')) {
-                        // Restore original position
-                        stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
-                        stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
-                        stretchingWall.updateVectors();
-                        showToast('Cannot stretch wall here. Placement would violate rules.', 'error');
-                    } else {
-                        // Valid stretch - save to state.history and deselect
-                        sim.addToHistory();
-                        updateBuildingEnvelopes(); // Update slabs after stretching
-                        state.selectedWalls = [];
-                    }
-                }
-                
-                stretchingWall = null;
-                stretchingEndpoint = null;
-                originalStretchPoint = null;
-                canvas.style.cursor = 'pointer';
-                validateAllWalls();
-                draw();
-            }
-            
-            if (resizingVoid) {
-                const v = resizingVoid.void;
-                const overlaps = state.voids.some(other =>
-                    other !== v && other.floorId === v.floorId &&
-                    v.x < other.x + other.width && v.x + v.width > other.x &&
-                    v.y < other.y + other.height && v.y + v.height > other.y
-                );
-                if (overlaps) {
-                    v.x = originalVoidState.x; v.y = originalVoidState.y;
-                    v.width = originalVoidState.width; v.height = originalVoidState.height;
-                    showToast('Resize would overlap another void', 'error');
-                } else {
-                    const operation = {
-                        objectType: 'void-resize',
-                        voidRef: v,
-                        oldState: { ...originalVoidState },
-                        newState: { x: v.x, y: v.y, width: v.width, height: v.height },
-                        timestamp: Date.now()
-                    };
-                    state.history.push(operation);
-                    state.redoHistory = [];
-                }
-                resizingVoid = null;
-                originalVoidState = null;
-                canvas.style.cursor = 'pointer';
-                draw();
-            }
-
-            if (isDragging) {
-                // Check if wall was actually moved
-                const selectedWall = state.selectedWalls[0];
-                const wasMoved = selectedWall && (
-                    selectedWall.pointA.x !== originalWallPos.ax ||
-                    selectedWall.pointA.y !== originalWallPos.ay ||
-                    selectedWall.pointB.x !== originalWallPos.bx ||
-                    selectedWall.pointB.y !== originalWallPos.by
-                );
-                
-                isDragging = false;
-                canvas.style.cursor = 'pointer';
-                dragStartPos = null;
-                originalWallPos = null;
-                
-                // Only deselect if wall was actually moved
-                if (wasMoved) {
-                    updateBuildingEnvelopes(); // Update slabs after moving
-                    state.selectedWalls = [];
-                }
-                
-                validateAllWalls();
-                draw();
-            }
-        });
-        
-        canvas.addEventListener('mousemove', (e) => {
-            if (isPanning) {
-                const dx = e.clientX - lastPanPos.x;
-                const dy = e.clientY - lastPanPos.y;
-                panOffset.x += dx;
-                panOffset.y += dy;
-                lastPanPos = { x: e.clientX, y: e.clientY };
-                draw();
-                return;
-            }
-            
-            const pos = getMousePosition(e);
-            currentMousePos = pos;
-
-            // Handle void resizing
-            if (state.currentMode === 'select' && resizingVoid) {
-                const v = resizingVoid.void;
-                const h = resizingVoid.handle;
-                const snappedX = sim.snapToVoidGrid(pos.x);
-                const snappedY = sim.snapToVoidGrid(pos.y);
-                let newX = v.x, newY = v.y, newW = v.width, newH = v.height;
-                if (h.includes('w')) { newX = snappedX; newW = originalVoidState.x + originalVoidState.width - snappedX; }
-                if (h.includes('e')) { newW = snappedX - originalVoidState.x; }
-                if (h.includes('n')) { newY = snappedY; newH = originalVoidState.y + originalVoidState.height - snappedY; }
-                if (h.includes('s')) { newH = snappedY - originalVoidState.y; }
-                if (h === 'n' || h === 's') { newX = v.x; newW = v.width; }
-                if (h === 'e' || h === 'w') { newY = v.y; newH = v.height; }
-                if (newW >= MIN_VOID_SIZE && newH >= MIN_VOID_SIZE) {
-                    v.x = newX; v.y = newY; v.width = newW; v.height = newH;
-                }
-                draw();
-                return;
-            }
-
-            // Handle wall stretching
-            if (state.currentMode === 'select' && stretchingWall) {
-                // Constrain to wall's axis (horizontal or vertical)
-                const isHorizontal = Math.abs(originalStretchPoint.bx - originalStretchPoint.ax) > 
-                                    Math.abs(originalStretchPoint.by - originalStretchPoint.ay);
-                
-                let newPoint;
-                if (isHorizontal) {
-                    // Horizontal wall - only allow X movement
-                    newPoint = {
-                        x: sim.snapToGrid(pos.x, GRID_SIZE_EXTERNAL),
-                        y: stretchingEndpoint === 'A' ? originalStretchPoint.ay : originalStretchPoint.by
-                    };
-                } else {
-                    // Vertical wall - only allow Y movement
-                    newPoint = {
-                        x: stretchingEndpoint === 'A' ? originalStretchPoint.ax : originalStretchPoint.bx,
-                        y: sim.snapToGrid(pos.y, GRID_SIZE_EXTERNAL)
-                    };
-                }
-                
-                // Snap stretched wall length to 600mm grid
-                const otherPoint = stretchingEndpoint === 'A'
-                    ? { x: stretchingWall.pointB.x, y: stretchingWall.pointB.y }
-                    : { x: stretchingWall.pointA.x, y: stretchingWall.pointA.y };
-
-                const stretchDx = Math.abs(newPoint.x - otherPoint.x);
-                const stretchDy = Math.abs(newPoint.y - otherPoint.y);
-                const rawLength = Math.max(stretchDx, stretchDy);
-                const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
-
-                if (snappedLength >= MIN_WALL_LENGTH) {
-                    if (isHorizontal) {
-                        const dir = newPoint.x > otherPoint.x ? 1 : -1;
-                        newPoint.x = otherPoint.x + dir * snappedLength;
-                    } else {
-                        const dir = newPoint.y > otherPoint.y ? 1 : -1;
-                        newPoint.y = otherPoint.y + dir * snappedLength;
-                    }
-                }
-
-                // Update the endpoint being stretched
-                if (stretchingEndpoint === 'A') {
-                    stretchingWall.pointA = newPoint;
-                } else {
-                    stretchingWall.pointB = newPoint;
-                }
-                
-                stretchingWall.updateVectors();
-                draw();
-                return;
-            }
-
-            if (state.currentMode === 'select' && isDragging && state.selectedWalls.length === 1) {
-                // Calculate offset from drag start
-                const offsetX = pos.x - dragStartPos.x;
-                const offsetY = pos.y - dragStartPos.y;
-                
-                // Snap offset to grid
-                const snappedOffsetX = sim.snapToGrid(offsetX, GRID_SIZE_EXTERNAL);
-                const snappedOffsetY = sim.snapToGrid(offsetY, GRID_SIZE_EXTERNAL);
-                
-                // Update wall position
-                const selectedWall = state.selectedWalls[0];
-                selectedWall.pointA.x = originalWallPos.ax + snappedOffsetX;
-                selectedWall.pointA.y = originalWallPos.ay + snappedOffsetY;
-                selectedWall.pointB.x = originalWallPos.bx + snappedOffsetX;
-                selectedWall.pointB.y = originalWallPos.by + snappedOffsetY;
-                selectedWall.updateVectors();
-                
-                draw();
-                return;
-            }
-
-            if (state.currentMode === 'draw' && drawingWall) {
-                // Constrain to horizontal or vertical only
-                const dx = Math.abs(pos.x - drawingWall.x);
-                const dy = Math.abs(pos.y - drawingWall.y);
-
-                let constrained;
-                if (dx > dy) {
-                    constrained = { x: pos.x, y: drawingWall.y };
-                } else {
-                    constrained = { x: drawingWall.x, y: pos.y };
-                }
-
-                tempPoint = sim.snapLengthToGrid(drawingWall, constrained);
-            }
-
-            if (state.currentMode === 'void' && drawingVoid) {
-                tempPoint = {
-                    x: sim.snapToVoidGrid(pos.x),
-                    y: sim.snapToVoidGrid(pos.y)
-                };
-            }
-            draw();
-        });
-
-        canvas.addEventListener('mouseleave', () => {
-            if (isPanning) {
-                isPanning = false;
-                canvas.style.cursor = state.currentMode === 'draw' ? 'crosshair' : 'pointer';
-            }
-            
-            if (stretchingWall) {
-                // Restore original position if user leaves canvas while stretching
-                stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
-                stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
-                stretchingWall.updateVectors();
-                stretchingWall = null;
-                stretchingEndpoint = null;
-                originalStretchPoint = null;
-            }
-            
-            if (isDragging) {
-                isDragging = false;
-                canvas.style.cursor = 'pointer';
-                dragStartPos = null;
-                originalWallPos = null;
-            }
-            
-            currentMousePos = null;
-            draw();
-        });
-
-        canvas.addEventListener('mousedown', (e) => {
-            // Check for panning first
-            if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
-                // Middle mouse or Ctrl+Left mouse for panning
-                isPanning = true;
-                lastPanPos = { x: e.clientX, y: e.clientY };
-                canvas.style.cursor = 'grabbing';
-                e.preventDefault();
-                return;
-            }
-            
-            const pos = getMousePosition(e);
-
-            if (state.currentMode === 'draw') {
-                if (!drawingWall) {
-                    // Start drawing
-                    drawingWall = pos;
-                    tempPoint = pos;
-                } else {
-                    // Finish drawing
-                    const thickness = parseInt(document.getElementById('wallThickness').value);
-                    const height = 2700; // Default height
-                    
-                    // Constrain to horizontal or vertical
-                    const dx = Math.abs(pos.x - drawingWall.x);
-                    const dy = Math.abs(pos.y - drawingWall.y);
-                    let finalPos = pos;
-                    if (dx > dy) {
-                        finalPos = { x: pos.x, y: drawingWall.y };
-                    } else {
-                        finalPos = { x: drawingWall.x, y: pos.y };
-                    }
-
-                    // Snap wall length to 600mm grid
-                    finalPos = sim.snapLengthToGrid(drawingWall, finalPos);
-
-                    // Apply flip by swapping start/end if flipped
-                    const startX = wallFlipped ? finalPos.x : drawingWall.x;
-                    const startY = wallFlipped ? finalPos.y : drawingWall.y;
-                    const endX = wallFlipped ? drawingWall.x : finalPos.x;
-                    const endY = wallFlipped ? drawingWall.y : finalPos.y;
-                    
-                    const newWall = new Wall(
-                        startX,
-                        startY,
-                        endX,
-                        endY,
-                        thickness,
-                        height,
-                        null, // No groupId for single state.walls
-                        state.currentFloorId // Assign to current floor
-                    );
-
-                    if (newWall.length < MIN_WALL_LENGTH) {
-                        showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
-                        drawingWall = null;
-                        tempPoint = null;
-                        clearDrawingToast();
-                        draw();
-                        return;
-                    }
-
-                    // Check if wall is in restricted zone
-                    const restriction = sim.isWallInRestrictedZone(newWall);
-                    if (restriction.restricted) {
-                        let message = 'Cannot place wall here.';
-                        if (restriction.zone.reason) {
-                            message += ` ${restriction.zone.reason}`;
-                        } else if (restriction.zone.distance) {
-                            message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
-                        }
-                        showToast(message, 'error');
-                        drawingWall = null;
-                        tempPoint = null;
-                        clearDrawingToast();
-                        draw();
-                        return;
-                    }
-
-                    // Add wall to state.walls array
-                    state.walls.push(newWall);
-                    
-                    // Add to state.history for undo
-                    sim.addToHistory([newWall]);
-                    
-                    // Update building envelopes (waffle slabs)
-                    updateBuildingEnvelopes();
-                    
-                    drawingWall = null;
-                    tempPoint = null;
-                    wallFlipped = false; // Reset flip state
-                    clearDrawingToast();
-                    updateUI();
-                    validateAllWalls();
-                }
-            } else if (state.currentMode === 'select') {
-                // Check if clicked on a resize handle of the selected void (takes priority)
-                if (state.selectedVoid) {
-                    const handle = sim.getVoidResizeHandle(pos, state.selectedVoid);
-                    if (handle) {
-                        resizingVoid = { void: state.selectedVoid, handle: handle };
-                        originalVoidState = { x: state.selectedVoid.x, y: state.selectedVoid.y, width: state.selectedVoid.width, height: state.selectedVoid.height };
-                        canvas.style.cursor = handle + '-resize';
-                        return;
-                    }
-                }
-
-                // Check if clicked near an endpoint of a SELECTED wall (for stretching)
-                const endpointHit = sim.getEndpointNearPoint(pos.x, pos.y, 20, zoomLevel);
-                
-                if (endpointHit && state.selectedWalls.includes(endpointHit.wall)) {
-                    // Start stretching (only if wall is already selected)
-                    stretchingWall = endpointHit.wall;
-                    stretchingEndpoint = endpointHit.endpoint;
-                    originalStretchPoint = {
-                        ax: stretchingWall.pointA.x,
-                        ay: stretchingWall.pointA.y,
-                        bx: stretchingWall.pointB.x,
-                        by: stretchingWall.pointB.y
-                    };
-                    canvas.style.cursor = 'grab';
-                } else {
-                    // Find wall at click position (only on current floor)
-                    // Use containsPoint for normal selection (ignore endpoints for unselected state.walls)
-                    let clickedWall = null;
-                    for (let i = state.walls.length - 1; i >= 0; i--) {
-                        if (state.walls[i].floorId === state.currentFloorId && state.walls[i].containsPoint(pos.x, pos.y)) {
-                            clickedWall = state.walls[i];
-                            break;
-                        }
-                    }
-                    
-                    // Multi-select with shift
-                    if (e.shiftKey && clickedWall) {
-                        const index = state.selectedWalls.indexOf(clickedWall);
-                        if (index > -1) {
-                            // Deselect if already selected
-                            state.selectedWalls.splice(index, 1);
-                        } else {
-                            // Add to selection
-                            state.selectedWalls.push(clickedWall);
-                        }
-                        state.selectedVoid = null;
-                    } else if (clickedWall) {
-                        // Single select
-                        state.selectedWalls = [clickedWall];
-                        state.selectedVoid = null;
-
-                        // Start dragging
-                        isDragging = true;
-                        dragStartPos = pos;
-                        originalWallPos = {
-                            ax: clickedWall.pointA.x,
-                            ay: clickedWall.pointA.y,
-                            bx: clickedWall.pointB.x,
-                            by: clickedWall.pointB.y
-                        };
-                        canvas.style.cursor = 'grabbing';
-                    } else {
-                        const clickedVoid = sim.getVoidAtPoint(pos.x, pos.y, state.currentFloorId);
-                        if (clickedVoid) {
-                            state.selectedWalls = [];
-                            state.selectedVoid = clickedVoid;
-                        } else {
-                            state.selectedWalls = [];
-                            state.selectedVoid = null;
-                        }
-                    }
-                }
-                
-                updateUI();
-                draw();
-            } else if (state.currentMode === 'delete') {
-                // Find wall at click position (only on current floor)
-                let clickedWall = null;
-                for (let i = state.walls.length - 1; i >= 0; i--) {
-                    if (state.walls[i].floorId === state.currentFloorId && state.walls[i].containsPoint(pos.x, pos.y)) {
-                        clickedWall = state.walls[i];
-                        break;
-                    }
-                }
-                
-                if (clickedWall) {
-                    sim.addToHistory();
-                    const index = state.walls.indexOf(clickedWall);
-                    if (index > -1) {
-                        state.walls.splice(index, 1);
-                        showToast('Deleted 1 wall', 'info', 2000);
-                        updateUI();
-                        validateAllWalls();
-                    }
-                }
-                if (!clickedWall) {
-                    const clickedVoid = sim.getVoidAtPoint(pos.x, pos.y, state.currentFloorId);
-                    if (clickedVoid) {
-                        const idx = state.voids.indexOf(clickedVoid);
-                        if (idx !== -1) {
-                            state.voids.splice(idx, 1);
-                            sim.addVoidDeletionToHistory(clickedVoid);
-                            showToast('Void deleted', 'info', 2000);
-                            draw();
-                        }
-                    }
-                }
-            } else if (state.currentMode === 'void') {
-                if (!drawingVoid) {
-                    const snappedX = sim.snapToVoidGrid(pos.x);
-                    const snappedY = sim.snapToVoidGrid(pos.y);
-                    drawingVoid = { startX: snappedX, startY: snappedY };
-                } else {
-                    const snappedX = sim.snapToVoidGrid(pos.x);
-                    const snappedY = sim.snapToVoidGrid(pos.y);
-                    const x = Math.min(drawingVoid.startX, snappedX);
-                    const y = Math.min(drawingVoid.startY, snappedY);
-                    const width = Math.abs(snappedX - drawingVoid.startX);
-                    const height = Math.abs(snappedY - drawingVoid.startY);
-                    if (width < MIN_VOID_SIZE || height < MIN_VOID_SIZE) {
-                        showToast(`Void is too small. Minimum size: ${MIN_VOID_SIZE / 10}cm x ${MIN_VOID_SIZE / 10}cm`, 'error');
-                        drawingVoid = null;
-                        draw();
-                        return;
-                    }
-                    const overlaps = state.voids.some(v =>
-                        v.floorId === state.currentFloorId &&
-                        x < v.x + v.width && x + width > v.x &&
-                        y < v.y + v.height && y + height > v.y
-                    );
-                    if (overlaps) {
-                        showToast('Voids cannot overlap', 'error');
-                        drawingVoid = null;
-                        draw();
-                        return;
-                    }
-                    const newVoid = {
-                        id: sim.generateVoidId(),
-                        floorId: state.currentFloorId,
-                        x: x, y: y,
-                        width: width, height: height
-                    };
-                    const proximityViolations = sim.validateVoidWallProximity(newVoid);
-                    if (proximityViolations.length > 0) {
-                        showToast(proximityViolations[0].message, 'error');
-                        drawingVoid = null;
-                        draw();
-                        return;
-                    }
-                    state.voids.push(newVoid);
-                    sim.addToHistory([newVoid], 'void');
-                    drawingVoid = null;
-                    draw();
-                    showToast('Void placed', 'info', 2000);
-                }
-            }
-        });
-
-        // UI Event handlers
         document.getElementById('drawWallBtn').addEventListener('click', () => {
             state.currentMode = 'draw';
-            drawingWall = null;
-            tempPoint = null;
-            wallFlipped = false;
+            resetDrawingState();
             state.selectedWalls = [];
-            drawingVoid = null;
             state.selectedVoid = null;
-            clearDrawingToast();
             updateModeUI();
-            draw();
+            renderer2D.draw();
         });
 
         document.getElementById('selectBtn').addEventListener('click', () => {
             state.currentMode = 'select';
-            drawingWall = null;
-            tempPoint = null;
-            wallFlipped = false;
-            drawingVoid = null;
+            resetDrawingState();
             state.selectedVoid = null;
-            clearDrawingToast();
             updateModeUI();
         });
 
         document.getElementById('deleteBtn').addEventListener('click', () => {
             if (state.selectedWalls.length > 0) {
-                // Delete all selected state.walls
                 sim.addToHistory();
                 const count = state.selectedWalls.length;
-                // Use filter to avoid index shifting issues when deleting multiple state.walls
                 state.walls = state.walls.filter(wall => !state.selectedWalls.includes(wall));
                 state.selectedWalls = [];
-                drawingVoid = null;
                 state.selectedVoid = null;
-                updateBuildingEnvelopes(); // Update slabs after deletion
+                resetDrawingState();
+                updateBuildingEnvelopes();
                 showToast(`Deleted ${count} wall${count > 1 ? 's' : ''}`, 'info', 2000);
                 updateUI();
                 validateAllWalls();
             } else {
-                // Switch to delete mode
                 state.currentMode = 'delete';
-                drawingWall = null;
-                tempPoint = null;
-                wallFlipped = false;
+                resetDrawingState();
                 state.selectedWalls = [];
-                drawingVoid = null;
                 state.selectedVoid = null;
-                clearDrawingToast();
                 updateModeUI();
-                draw();
+                renderer2D.draw();
             }
         });
-        
+
         document.getElementById('flipWallBtn').addEventListener('click', () => {
-            // Flip wall during drawing
-            if (drawingWall && tempPoint) {
-                wallFlipped = !wallFlipped;
-                draw();
-            }
-            // Flip selected state.walls
-            else if (state.selectedWalls.length > 0) {
-                sim.addToHistory(); // Save state before flipping
+            if (interactionState.drawingWall && interactionState.tempPoint) {
+                // Flip is handled via keyboard in interaction.js;
+                // trigger a space-key equivalent
+                window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
+            } else if (state.selectedWalls.length > 0) {
+                sim.addToHistory();
                 state.selectedWalls.forEach(wall => {
-                    // Swap pointA and pointB to reverse the wall orientation
-                    const tempPoint = wall.pointA;
+                    const tp = wall.pointA;
                     wall.pointA = wall.pointB;
-                    wall.pointB = tempPoint;
-                    wall.updateVectors(); // Recalculate direction and normal
+                    wall.pointB = tp;
+                    wall.updateVectors();
                 });
                 validateAllWalls();
-                draw();
+                renderer2D.draw();
             }
         });
 
         document.getElementById('drawVoidBtn').addEventListener('click', () => {
             state.currentMode = 'void';
-            drawingWall = null;
-            tempPoint = null;
-            drawingVoid = null;
+            resetDrawingState();
             state.selectedWalls = [];
             state.selectedVoid = null;
-            clearDrawingToast();
             updateModeUI();
-            draw();
-        });
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            // Space key to flip wall during drawing or flip selected state.walls
-            if (e.code === 'Space') {
-                if (drawingWall && tempPoint) {
-                    e.preventDefault(); // Prevent page scroll
-                    wallFlipped = !wallFlipped;
-                    draw();
-                } else if (state.selectedWalls.length > 0) {
-                    e.preventDefault(); // Prevent page scroll
-                    sim.addToHistory(); // Save state before flipping
-                    state.selectedWalls.forEach(wall => {
-                        // Swap pointA and pointB to reverse the wall orientation
-                        const tempPoint = wall.pointA;
-                        wall.pointA = wall.pointB;
-                        wall.pointB = tempPoint;
-                        wall.updateVectors(); // Recalculate direction and normal
-                    });
-                    validateAllWalls();
-                    draw();
-                }
-            }
-            
-            // Escape key to cancel wall drawing
-            if (e.key === 'Escape' && drawingWall) {
-                e.preventDefault();
-                drawingWall = null;
-                tempPoint = null;
-                wallFlipped = false;
-                clearDrawingToast();
-                draw();
-            }
-            
-            // Ctrl+Z or Cmd+Z for undo
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-                e.preventDefault(); // Prevent browser undo
-                undo();
-            }
-            
-            // Ctrl+Shift+Z or Cmd+Shift+Z or Ctrl+Y for redo
-            if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key === 'z' || e.key === 'y')) {
-                e.preventDefault(); // Prevent browser redo
-                redo();
-            }
-            
-            // Delete or Backspace to delete selected state.walls
-            if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedWalls.length > 0 && state.currentMode === 'select') {
-                e.preventDefault(); // Prevent browser back navigation on Backspace
-                sim.addToHistory();
-                const count = state.selectedWalls.length;
-                // Use filter to avoid index shifting issues when deleting multiple state.walls
-                state.walls = state.walls.filter(wall => !state.selectedWalls.includes(wall));
-                state.selectedWalls = [];
-                updateBuildingEnvelopes(); // Update slabs after deletion
-                updateUI();
-                validateAllWalls();
-                showToast(`Deleted ${count} wall${count > 1 ? 's' : ''}`, 'info', 2000);
-            }
+            renderer2D.draw();
         });
 
         document.getElementById('clearAllBtn').addEventListener('click', () => {
             if (state.walls.length > 0 && confirm('Are you sure you want to clear all walls?')) {
                 state.walls = [];
                 state.selectedWalls = [];
-                drawingWall = null;
-                tempPoint = null;
                 state.voids = [];
                 state.selectedVoid = null;
-                drawingVoid = null;
-                state.history = []; // Clear undo history
-                state.redoHistory = []; // Clear redo history
-                updateBuildingEnvelopes(); // Update slabs after clearing
+                resetDrawingState();
+                state.history = [];
+                state.redoHistory = [];
+                updateBuildingEnvelopes();
                 updateUI();
-                draw();
+                renderer2D.draw();
             }
         });
-        
+
         // Rules Modal
         const rulesModal = document.getElementById('rulesModal');
         const showRulesBtn = document.getElementById('showRulesBtn');
         const modalClose = document.querySelector('.modal-close');
-        
+
         showRulesBtn.addEventListener('click', () => {
             rulesModal.classList.add('show');
         });
-        
+
         modalClose.addEventListener('click', () => {
             rulesModal.classList.remove('show');
         });
-        
-        // Close modal when clicking outside
+
         // Changelog Modal
         const changelogModal = document.getElementById('changelogModal');
         const versionBadge = document.getElementById('versionBadge');
         const changelogModalClose = document.getElementById('changelogModalClose');
-        
+
         versionBadge.addEventListener('click', () => {
             changelogModal.classList.add('show');
         });
-        
+
         changelogModalClose.addEventListener('click', () => {
             changelogModal.classList.remove('show');
         });
-        
-        // Add hover effect to version badge
+
         versionBadge.addEventListener('mouseenter', () => {
             versionBadge.style.background = 'rgba(0, 0, 0, 0.04)';
             versionBadge.style.borderColor = 'rgba(0, 0, 0, 0.1)';
         });
-        
+
         versionBadge.addEventListener('mouseleave', () => {
             versionBadge.style.background = 'rgba(0, 0, 0, 0.02)';
             versionBadge.style.borderColor = 'rgba(0, 0, 0, 0.06)';
         });
-        
+
         window.addEventListener('click', (e) => {
             if (e.target === rulesModal) {
                 rulesModal.classList.remove('show');
@@ -2905,7 +982,7 @@
                 changelogModal.classList.remove('show');
             }
         });
-        
+
         // Feedback Modal
         const feedbackModal = document.getElementById('feedbackModal');
         const feedbackBtn = document.getElementById('feedbackBtn');
@@ -2913,30 +990,29 @@
         const feedbackCancel = document.getElementById('feedbackCancel');
         const feedbackForm = document.getElementById('feedbackForm');
         const feedbackStatus = document.getElementById('feedbackStatus');
-        
+
         feedbackBtn.addEventListener('click', () => {
             feedbackModal.classList.add('show');
         });
-        
+
         feedbackModalClose.addEventListener('click', () => {
             feedbackModal.classList.remove('show');
         });
-        
+
         feedbackCancel.addEventListener('click', () => {
             feedbackModal.classList.remove('show');
         });
-        
+
         feedbackForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const submitBtn = document.getElementById('feedbackSubmit');
             const email = document.getElementById('feedbackEmail').value;
             const message = document.getElementById('feedbackMessage').value;
-            
-            // Disable submit button
+
             submitBtn.disabled = true;
             submitBtn.textContent = 'Sending...';
-            
+
             try {
                 const response = await fetch('/api/feedback', {
                     method: 'POST',
@@ -2945,17 +1021,15 @@
                     },
                     body: JSON.stringify({ email, message })
                 });
-                
+
                 if (response.ok) {
                     feedbackStatus.style.display = 'block';
                     feedbackStatus.style.background = 'rgba(76, 175, 80, 0.1)';
                     feedbackStatus.style.color = '#4CAF50';
                     feedbackStatus.textContent = 'Thank you! Your feedback has been sent.';
-                    
-                    // Reset form
+
                     feedbackForm.reset();
-                    
-                    // Close modal after 2 seconds
+
                     setTimeout(() => {
                         feedbackModal.classList.remove('show');
                         feedbackStatus.style.display = 'none';
@@ -2974,29 +1048,28 @@
             }
         });
 
-        document.getElementById('showOtherFloors').addEventListener('change', draw);
-        document.getElementById('showLevelsAbove').addEventListener('change', draw);
-        
+        document.getElementById('showOtherFloors').addEventListener('change', () => renderer2D.draw());
+        document.getElementById('showLevelsAbove').addEventListener('change', () => renderer2D.draw());
+
         document.getElementById('slabRestrictionsEnabled').addEventListener('change', (e) => {
             state.slabRestrictionsEnabled = e.target.checked;
             validateAllWalls();
-            draw();
+            renderer2D.draw();
         });
 
         document.getElementById('wallThickness').addEventListener('change', () => {
-            // Update thickness for all selected state.walls
             if (state.selectedWalls.length > 0) {
                 const newThickness = parseInt(document.getElementById('wallThickness').value);
                 state.selectedWalls.forEach(wall => {
                     wall.thickness = newThickness;
                     wall.updateVectors();
                 });
-                draw();
+                renderer2D.draw();
                 validateAllWalls();
             }
         });
-        
-        // Level management event listeners
+
+        // Level management
         document.getElementById('addFloorBtn').addEventListener('click', () => {
             const newFloorId = state.floors.length;
             const newFloor = {
@@ -3008,9 +1081,9 @@
             updateFloorDropdown();
             state.currentFloorId = newFloorId;
             document.getElementById('currentFloor').value = state.currentFloorId;
-            draw();
+            renderer2D.draw();
         });
-        
+
         document.getElementById('removeFloorBtn').addEventListener('click', () => {
             if (state.floors.length > 1) {
                 const confirmed = confirm(`Remove ${state.floors[state.floors.length - 1].name}? All walls on this level will be deleted.`);
@@ -3018,40 +1091,40 @@
                     const removedFloorId = state.floors[state.floors.length - 1].id;
                     state.floors.pop();
                     state.walls = state.walls.filter(w => w.floorId !== removedFloorId);
-                    updateBuildingEnvelopes(); // Update slabs after removing floor
+                    updateBuildingEnvelopes();
                     if (state.currentFloorId === removedFloorId) {
                         state.currentFloorId = state.floors[state.floors.length - 1].id;
                     }
                     updateFloorDropdown();
                     document.getElementById('currentFloor').value = state.currentFloorId;
-                    draw();
+                    renderer2D.draw();
                     validateAllWalls();
                 }
             }
         });
-        
+
         document.getElementById('currentFloor').addEventListener('change', (e) => {
             state.currentFloorId = parseInt(e.target.value);
             state.selectedWalls = [];
-            draw();
+            renderer2D.draw();
             validateAllWalls();
         });
-        
-        document.getElementById('showOtherFloors').addEventListener('change', draw);
-        
+
         // Initialize UI
         updateFloorDropdown();
         updateModeUI();
         updateUI();
-        
-        // Show initial message
+
         const violationsList = document.getElementById('violationsList');
         if (violationsList) {
-            violationsList.innerHTML = 
+            violationsList.innerHTML =
                 '<div class="no-violations">Draw walls to start. Click once for start point, move horizontally or vertically, then click for end point.</div>';
         }
         }
 
+        // ============================================================
+        // UI helpers (remain in index.html)
+        // ============================================================
         function updateFloorDropdown() {
             const select = document.getElementById('currentFloor');
             select.innerHTML = '';
@@ -3065,32 +1138,31 @@
         }
 
         function updateModeUI() {
+            const canvas = renderer2D.getCanvas();
             document.querySelectorAll('.tool-buttons .btn.active').forEach(btn => {
                 btn.classList.remove('active');
             });
 
             if (state.currentMode === 'draw') {
                 document.getElementById('drawWallBtn').classList.add('active');
-                canvas.style.cursor = 'crosshair';
+                if (canvas) canvas.style.cursor = 'crosshair';
             } else if (state.currentMode === 'select') {
                 document.getElementById('selectBtn').classList.add('active');
-                canvas.style.cursor = 'pointer';
+                if (canvas) canvas.style.cursor = 'pointer';
             } else if (state.currentMode === 'delete') {
                 document.getElementById('deleteBtn').classList.add('active');
-                canvas.style.cursor = 'pointer';
+                if (canvas) canvas.style.cursor = 'pointer';
             } else if (state.currentMode === 'void') {
                 document.getElementById('drawVoidBtn').classList.add('active');
-                canvas.style.cursor = 'crosshair';
+                if (canvas) canvas.style.cursor = 'crosshair';
             }
         }
 
         function updateUI() {
-            // Update thickness dropdown if there's a single selected wall
             if (state.selectedWalls.length === 1) {
                 document.getElementById('wallThickness').value = state.selectedWalls[0].thickness;
             }
-
-            draw();
+            renderer2D.draw();
         }
     </script>
 
