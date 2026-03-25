@@ -51,8 +51,8 @@ The single source of truth. No DOM, no rendering, no event handling. Pure data a
 - `history`, `redoHistory` — undo/redo stacks
 - `envelopeAngleViolations` — cached validation results
 
-**Mutations** (modify state, return success/error info):
-- `addWall(ax, ay, bx, by, thickness, height, groupId, floorId)` → Wall or error
+**Mutations** (modify state, return `{ok: true, result}` or `{ok: false, message: string}`):
+- `addWall(ax, ay, bx, by, thickness, height, groupId, floorId)` → Wall or error. Auto-segments walls >6000mm into multiple Wall instances sharing a `groupId` (existing behavior).
 - `removeWall(wall)` — removes and updates envelopes
 - `addVoid(floorId, x, y, width, height)` → void object or error
 - `removeVoid(void)` — removes with history
@@ -61,6 +61,8 @@ The single source of truth. No DOM, no rendering, no event handling. Pure data a
 - `setMode(mode)`, `switchFloor(floorId)`, `addFloor()`, `removeFloor(floorId)`
 - `setSlabRestrictions(enabled)`
 - `clearAll()`
+
+All mutations that can fail return a structured result. The caller (interaction.js or sidebar wiring in index.html) is responsible for showing toasts based on the error message. `sim.js` never touches the DOM.
 
 **Queries** (read-only):
 - `validateWall(wall, wallIndex)` → violations array
@@ -80,6 +82,10 @@ The single source of truth. No DOM, no rendering, no event handling. Pure data a
 - `generateVoidId()`
 - `getVoidResizeHandle(pos, void)` → handle name or null
 
+**Note:** Pixel-coordinate conversions (`mmToPx`, `pxToMm`) are renderer-specific and live in `renderer2d.js`. The 3D renderer uses its own unit conversion (mm to Three.js world units).
+
+**Undo/redo format:** Operation-based (matching current behavior). Each operation has an `objectType` field (`'wall'`, `'void'`, `'void-delete'`, `'void-resize'`) and type-specific data. `undo()` and `redo()` dispatch on `objectType` to reverse or replay the operation. This is not changing — the existing format is preserved during extraction.
+
 ## Renderer Interface
 
 Both `renderer2d.js` and `renderer3d.js` export an object implementing:
@@ -87,14 +93,24 @@ Both `renderer2d.js` and `renderer3d.js` export an object implementing:
 ```javascript
 {
     init(container)          // Set up canvas/scene inside the DOM container
-    draw()                   // Full redraw from sim.js state
-    activate()               // Show, bind resize, start animation loop (3D)
-    deactivate()             // Hide, unbind, stop loop
-    screenToWorld(event)     // Mouse event → {x, y} in mm coordinates
-    drawPreview(start, current, mode)  // Live preview during drawing
-    destroy()                // Cleanup (optional, for hot-reload)
+    draw()                   // Full redraw from sim.js state (including preview if interaction state is set)
+    activate()               // Show container, bind resize listener, start animation loop (3D only)
+    deactivate()             // Hide container, unbind resize, stop animation loop, release GL resources (3D)
+    screenToWorld(event)     // Mouse event → {x, y} in mm coordinates (snapped to grid)
+    bindNavigation()         // Bind renderer-specific navigation (pan/zoom for 2D, OrbitControls for 3D)
+    unbindNavigation()       // Unbind renderer-specific navigation
 }
 ```
+
+**Navigation is renderer-owned.** Each renderer binds and manages its own camera/navigation controls:
+- 2D: middle-click pan, scroll zoom (canvas transform math, `panOffset`, `zoomLevel` stored in renderer)
+- 3D: OrbitControls (right-click rotate, middle-click pan, scroll zoom — Three.js manages its own listeners)
+
+Navigation bindings are set up in `activate()` and torn down in `deactivate()`. `interaction.js` never handles navigation — it only handles app-level tool interactions (draw, select, delete, void).
+
+**Preview rendering** is part of `draw()`, not a separate method. The renderer reads interaction state (exposed by `interaction.js`: `drawingWall`, `tempPoint`, `drawingVoid`, etc.) and renders the preview as part of its normal draw cycle. This gives the renderer full control over how previews look (restricted zones, snap indicators, measurement labels, flip indicators in 2D; transparent meshes in 3D).
+
+**`deactivate()` fully cleans up.** For the 3D renderer this means stopping the animation loop and detaching OrbitControls listeners. The WebGL context and scene graph are preserved (not destroyed) so reactivation is fast — but no rendering or event processing occurs while deactivated.
 
 ### `renderer2d.js`
 
@@ -151,13 +167,29 @@ New Three.js-based renderer with visual parity:
 - "Show Levels Below" toggle: controls visibility of floors below the current one
 - "Show Levels Above" toggle: controls visibility of floors above (if ever needed)
 
-**`screenToWorld(event)`:** Raycasts from camera through mouse position onto the ground plane at the current floor's Y height, converts the intersection point to mm coordinates.
+**`screenToWorld(event)`:** Raycasts from camera through mouse position onto the ground plane at the current floor's Y height, converts the intersection point to mm coordinates (snapped to 300mm grid, same as 2D).
+
+**Axis constraint for wall drawing in 3D:** Handled by `interaction.js`, not the renderer. After getting raw mm coordinates from `screenToWorld()`, the interaction layer applies the same horizontal/vertical constraint logic used in 2D (compare dx vs dy from start point, snap to dominant axis). This is shared code — the renderer just provides the raw ground-plane hit point.
+
+**Three.js loading:** Import via CDN ES module import map in `index.html`, same pattern as the existing `index3d.html`:
+```html
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+```
 
 ## Module: `interaction.js`
 
-Shared mouse/keyboard event handlers. Written once, works with both renderers.
+Shared **app-level** mouse/keyboard event handlers. Written once, works with both renderers. Does NOT handle navigation (pan/zoom/orbit) — that's renderer-owned.
 
 **Imports:** `sim.js` for state and mutations, active renderer reference for `screenToWorld()` and `draw()`.
+
+**Toast/UI feedback:** After calling a `sim.*` mutation, checks the result. If `{ok: false, message}`, calls `showToast(message, 'error')`. `showToast()` is defined in `index.html` (DOM function) and passed to `interaction.js` during initialization.
 
 **Tracks interaction state:**
 - `drawingWall` — start point of wall being drawn
@@ -180,9 +212,10 @@ Shared mouse/keyboard event handlers. Written once, works with both renderers.
 - Void mode: starts or finalizes void drawing (calls `sim.addVoid()`)
 
 `onMouseMove(event)`:
-- Gets mm coordinates
-- Updates preview via `activeRenderer.drawPreview()`
+- Gets mm coordinates via `activeRenderer.screenToWorld(event)`
+- Updates interaction state (`tempPoint`, stretch/resize positions) — the active renderer reads this state in its `draw()` to render previews
 - Handles wall stretching, void resizing, wall dragging
+- Calls `activeRenderer.draw()` to show updated preview
 - Updates cursor style
 
 `onMouseUp(event)`:
@@ -231,6 +264,16 @@ document.getElementById('toggleViewBtn').addEventListener('click', () => {
 ```
 
 **Toggle button:** Top-right corner of the viewport, small icon. Shows a cube icon when in 2D (click to go 3D), shows a grid/2D icon when in 3D (click to go 2D).
+
+**Sidebar wiring** stays in `index.html` as inline event listeners. Each sidebar control calls a `sim.*` mutation then `activeRenderer.draw()`:
+- Mode buttons (Draw Wall, Select, Delete, Draw Void, Flip Wall) → `sim.setMode()`
+- Floor management (add, remove, switch, show above/below) → `sim.addFloor()`, `sim.removeFloor()`, `sim.switchFloor()`
+- Wall properties (thickness dropdown) → updates thickness for next wall or selected wall
+- Actions (Clear All, Validate All) → `sim.clearAll()`, `sim.validateAllWalls()`
+- Slab isolation toggle → `sim.setSlabRestrictions()`
+- Rules/Feedback/Changelog modal buttons → DOM-only, no sim interaction
+
+**Animations:** Renderer-specific. The 2D envelope bounce animation stores a timestamp in `sim.js` (`newEnvelopeTimestamp`) that the renderer reads during `draw()`. The 3D renderer can implement its own animation treatment or ignore it. The 3D renderer's `animate()` loop (requestAnimationFrame) handles continuous rendering for OrbitControls damping; it calls `draw()` every frame while active.
 
 ## Migration Path
 
