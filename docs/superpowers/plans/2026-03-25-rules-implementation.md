@@ -117,14 +117,14 @@ function snapLengthToGrid(startPoint, endPoint) {
         // Horizontal wall — snap X distance
         const rawLength = Math.abs(dx);
         const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
-        if (snappedLength < MIN_WALL_LENGTH) return endPoint; // Let validation catch it
+        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y }; // Show zero-length until threshold reached
         const direction = dx > 0 ? 1 : -1;
         return { x: startPoint.x + direction * snappedLength, y: startPoint.y };
     } else {
         // Vertical wall — snap Y distance
         const rawLength = Math.abs(dy);
         const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
-        if (snappedLength < MIN_WALL_LENGTH) return endPoint; // Let validation catch it
+        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y }; // Show zero-length until threshold reached
         const direction = dy > 0 ? 1 : -1;
         return { x: startPoint.x, y: startPoint.y + direction * snappedLength };
     }
@@ -280,18 +280,27 @@ the drawing behavior."
 
 - [ ] **Step 1: Expose envelope wall indices from detection**
 
-The current `detectBuildingEnvelopes` returns `loops` (arrays of polygon points) but not the wall indices involved. The `updateBuildingEnvelopes` function needs modification. First, check the current `updateBuildingEnvelopes` function.
+The current `detectBuildingEnvelopes` returns `loops` (arrays of polygon points only). The `findLoop` function already returns `{ path, indices }` but `detectBuildingEnvelopes` discards the indices at line ~1449 where it does `loops.push(result.path)`.
 
-Find `updateBuildingEnvelopes` and modify it to also store wall indices per envelope. The `findLoop` function already returns `{ path, indices }` — make sure `updateBuildingEnvelopes` stores the indices.
+**Change 1:** In `detectBuildingEnvelopes`, change `loops.push(result.path)` to `loops.push({ path: result.path, indices: result.indices })`.
 
-Find where envelopes are stored (around the `updateBuildingEnvelopes` function) and ensure each envelope object includes a `wallIndices` array (indices into the floor's wall subset). This data will be used by the angle validator.
+**Change 2:** In `updateBuildingEnvelopes` (find it by searching for that function name), where it iterates over the returned loops and creates envelope objects, update the creation to include wall indices converted to **global** indices. The `indices` from `findLoop` are local to the `floorWalls` subset, so convert them:
 
-Modify the `buildingEnvelopes` data structure. Each envelope should become:
 ```javascript
-{ floorId, polygon: [{x, y}], wallIndices: [globalWallIndices], timestamp }
+// Where envelopes are created from loops, change from:
+//   { floorId: floor.id, polygon: polygon, timestamp: ... }
+// to:
+const floorWalls = walls.filter(w => w.floorId === floor.id);
+// ... in the loop over detected results:
+{
+    floorId: floor.id,
+    polygon: loopResult.path,
+    wallIndices: loopResult.indices.map(localIdx => walls.indexOf(floorWalls[localIdx])),
+    timestamp: ...
+}
 ```
 
-Update `detectBuildingEnvelopes` to return both paths and wall indices, and update `updateBuildingEnvelopes` to store them.
+The key conversion is `loopResult.indices.map(localIdx => walls.indexOf(floorWalls[localIdx]))` — this maps floor-local indices to global `walls[]` indices so that `isWallInEnvelope` (Task 10) can compare correctly.
 
 - [ ] **Step 2: Add envelope angle validation function**
 
@@ -513,6 +522,8 @@ function undo() {
 
 - [ ] **Step 5: Update redo() to handle voids**
 
+**Important:** The existing `redo()` calls `addToHistory()` which clears `redoHistory`, breaking consecutive redos. Fix this by pushing directly to `history` instead of calling `addToHistory`.
+
 Modify `redo()` (~line 831):
 ```javascript
 function redo() {
@@ -525,10 +536,25 @@ function redo() {
 
     if (operation.objectType === 'void') {
         operation.voids.forEach(v => voids.push(v));
-        addToHistory(operation.voids, 'void');
+    } else if (operation.objectType === 'void-delete') {
+        // Re-delete the void
+        const idx = voids.findIndex(v => v.id === operation.voidData.id);
+        if (idx !== -1) voids.splice(idx, 1);
+    } else if (operation.objectType === 'void-resize') {
+        const v = operation.voidRef;
+        v.x = operation.newState.x;
+        v.y = operation.newState.y;
+        v.width = operation.newState.width;
+        v.height = operation.newState.height;
     } else {
+        // Wall operations (existing logic)
         operation.walls.forEach(wall => walls.push(wall));
-        addToHistory(operation.walls, 'wall');
+    }
+
+    // Push directly to history (do NOT call addToHistory — it clears redoHistory)
+    history.push(operation);
+    if (history.length > MAX_HISTORY) {
+        history.shift();
     }
 
     selectedWalls = [];
@@ -577,19 +603,6 @@ if (lastOperation.objectType === 'void-delete') {
     selectedVoid = null;
 }
 ```
-
-And in `redo()`:
-```javascript
-// Add this case in redo():
-if (operation.objectType === 'void-delete') {
-    // Re-delete the void
-    const idx = voids.findIndex(v => v.id === operation.voidData.id);
-    if (idx !== -1) voids.splice(idx, 1);
-    addVoidDeletionToHistory(operation.voidData); // Not quite right — need to push directly
-}
-```
-
-Actually, simplify: for void-delete redo, just push the operation back to history directly instead of calling addVoidDeletionToHistory (which clears redo). Handle this inline in redo().
 
 - [ ] **Step 7: Commit**
 
@@ -1091,9 +1104,9 @@ if (currentMode === 'select' && resizingVoid) {
     let newX = v.x, newY = v.y, newW = v.width, newH = v.height;
 
     if (h.includes('w')) { newX = snappedX; newW = originalVoidState.x + originalVoidState.width - snappedX; }
-    if (h.includes('e')) { newW = snappedX - v.x; }
+    if (h.includes('e')) { newW = snappedX - originalVoidState.x; }
     if (h.includes('n')) { newY = snappedY; newH = originalVoidState.y + originalVoidState.height - snappedY; }
-    if (h.includes('s')) { newH = snappedY - v.y; }
+    if (h.includes('s')) { newH = snappedY - originalVoidState.y; }
 
     // For edge handles, only update the relevant axis
     if (h === 'n' || h === 's') { newX = v.x; newW = v.width; }
@@ -1155,9 +1168,9 @@ if (resizingVoid) {
 }
 ```
 
-- [ ] **Step 6: Add void-resize to undo/redo**
+- [ ] **Step 6: Add void-resize to undo()**
 
-In `undo()`, add:
+In `undo()`, add a case for `void-resize` (redo is already handled in the unified `redo()` from Task 5 Step 5):
 ```javascript
 if (lastOperation.objectType === 'void-resize') {
     const v = lastOperation.voidRef;
@@ -1166,18 +1179,6 @@ if (lastOperation.objectType === 'void-resize') {
     v.width = lastOperation.oldState.width;
     v.height = lastOperation.oldState.height;
     selectedVoid = null;
-}
-```
-
-In `redo()`, add:
-```javascript
-if (operation.objectType === 'void-resize') {
-    const v = operation.voidRef;
-    v.x = operation.newState.x;
-    v.y = operation.newState.y;
-    v.width = operation.newState.width;
-    v.height = operation.newState.height;
-    history.push(operation);
 }
 ```
 
@@ -1274,23 +1275,35 @@ function validateVoidWallProximity(v) {
             const internalY = wall.pointA.y;
             const externalY = wall.pointA.y + wall.n.y * wall.thickness;
 
-            // Check if void bottom edge touches internal face or void top edge
+            // Check if void edge touches OR crosses the wall face
+            // "Touches" = edge within tolerance of face line
+            // "Crosses" = void spans across the face (one edge on each side)
+            const voidTop = v.y;
+            const voidBottom = v.y + v.height;
+
             touchesInternalFace =
-                Math.abs(v.y + v.height - internalY) < adjacencyTolerance ||
-                Math.abs(v.y - internalY) < adjacencyTolerance;
+                Math.abs(voidBottom - internalY) < adjacencyTolerance ||
+                Math.abs(voidTop - internalY) < adjacencyTolerance ||
+                (voidTop < internalY && voidBottom > internalY); // void spans across face
             touchesExternalFace =
-                Math.abs(v.y + v.height - externalY) < adjacencyTolerance ||
-                Math.abs(v.y - externalY) < adjacencyTolerance;
+                Math.abs(voidBottom - externalY) < adjacencyTolerance ||
+                Math.abs(voidTop - externalY) < adjacencyTolerance ||
+                (voidTop < externalY && voidBottom > externalY); // void spans across face
         } else {
             const internalX = wall.pointA.x;
             const externalX = wall.pointA.x + wall.n.x * wall.thickness;
 
+            const voidLeft = v.x;
+            const voidRight = v.x + v.width;
+
             touchesInternalFace =
-                Math.abs(v.x + v.width - internalX) < adjacencyTolerance ||
-                Math.abs(v.x - internalX) < adjacencyTolerance;
+                Math.abs(voidRight - internalX) < adjacencyTolerance ||
+                Math.abs(voidLeft - internalX) < adjacencyTolerance ||
+                (voidLeft < internalX && voidRight > internalX); // void spans across face
             touchesExternalFace =
-                Math.abs(v.x + v.width - externalX) < adjacencyTolerance ||
-                Math.abs(v.x - externalX) < adjacencyTolerance;
+                Math.abs(voidRight - externalX) < adjacencyTolerance ||
+                Math.abs(voidLeft - externalX) < adjacencyTolerance ||
+                (voidLeft < externalX && voidRight > externalX); // void spans across face
         }
 
         if (!touchesInternalFace && !touchesExternalFace) return;
