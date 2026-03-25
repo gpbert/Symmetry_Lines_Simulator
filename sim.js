@@ -1644,13 +1644,14 @@ export function computeWallExtensions() {
                         y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
                     };
                 } else {
-                    // Shorten inward to near face (V's external face on body side)
+                    // Concave: V will be shortened, H extends toward body to fill the gap.
+                    // Extend H to V's external face (which is toward H's body)
                     targetX = nearFace;
-                    if (Math.abs(targetX - pt.x) < 1) break; // already at the right position
+                    if (Math.abs(targetX - pt.x) < 1) break;
                     extPt = { x: targetX, y: pt.y };
-                    // Column: at shortened end, offset toward body
+                    // Column: at the extended end, offset away from body (outward)
                     col = {
-                        x: targetX + towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
+                        x: targetX - towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
                         y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
                     };
                 }
