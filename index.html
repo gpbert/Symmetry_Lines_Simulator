@@ -2398,6 +2398,42 @@
             }
         }
         
+        function drawVoid(v, opacity = 1.0, isGhost = false) {
+            const x = mmToPx(v.x);
+            const y = mmToPx(v.y);
+            const w = mmToPx(v.width);
+            const h = mmToPx(v.height);
+            ctx.save();
+            if (isGhost) {
+                ctx.strokeStyle = `rgba(220, 38, 38, ${opacity * 0.5})`;
+                ctx.lineWidth = 1 / zoomLevel;
+                ctx.setLineDash([4 / zoomLevel, 4 / zoomLevel]);
+                ctx.strokeRect(x, y, w, h);
+            } else {
+                ctx.fillStyle = `rgba(220, 38, 38, ${opacity * 0.08})`;
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeStyle = `rgba(220, 38, 38, ${opacity * 0.3})`;
+                ctx.lineWidth = 1 / zoomLevel;
+                ctx.beginPath();
+                const step = 12 / zoomLevel;
+                ctx.save();
+                ctx.rect(x, y, w, h);
+                ctx.clip();
+                for (let i = -Math.max(w, h); i < Math.max(w, h) * 2; i += step) {
+                    ctx.moveTo(x + i, y);
+                    ctx.lineTo(x + i + Math.max(w, h), y + Math.max(w, h));
+                }
+                ctx.stroke();
+                ctx.restore();
+                const isSelected = selectedVoid === v;
+                ctx.strokeStyle = isSelected ? 'rgba(37, 99, 235, 0.9)' : `rgba(220, 38, 38, ${opacity * 0.6})`;
+                ctx.lineWidth = isSelected ? 2 / zoomLevel : 1.5 / zoomLevel;
+                ctx.setLineDash(isSelected ? [6 / zoomLevel, 3 / zoomLevel] : []);
+                ctx.strokeRect(x, y, w, h);
+            }
+            ctx.restore();
+        }
+
         function draw() {
             if (!ctx || !canvas) {
                 console.error('Canvas not initialized in draw!');
@@ -2500,9 +2536,23 @@
                 });
             }
             
+            // Draw voids from other floors (ghost)
+            if (document.getElementById('showOtherFloors').checked ||
+                document.getElementById('showLevelsAbove').checked) {
+                voids.forEach(v => {
+                    if (v.floorId !== currentFloorId) {
+                        const floorDiff = Math.abs(v.floorId - currentFloorId);
+                        if (floorDiff <= 3) {
+                            const ghostOpacity = floorDiff === 1 ? 0.4 : floorDiff === 2 ? 0.25 : 0.15;
+                            drawVoid(v, ghostOpacity, true);
+                        }
+                    }
+                });
+            }
+
             // Track walls generating restriction zones (for pulsing effect while drawing)
             const restrictingWalls = new Set();
-            
+
             // Get current level walls
             const currentFloorWalls = walls.filter(w => w.floorId === currentFloorId);
 
@@ -2513,6 +2563,11 @@
                     const violations = wallViolations.get(idx) || [];
                     drawWall(wall, isSelected, violations);
                 }
+            });
+
+            // Draw current floor voids
+            voids.filter(v => v.floorId === currentFloorId).forEach(v => {
+                drawVoid(v);
             });
             
             // Draw endpoint handles in select mode (only for selected walls)
@@ -2950,6 +3005,42 @@
                 ctx.stroke();
             }
             
+            // Draw void preview
+            if (currentMode === 'void' && drawingVoid && tempPoint) {
+                const previewX = Math.min(drawingVoid.startX, tempPoint.x);
+                const previewY = Math.min(drawingVoid.startY, tempPoint.y);
+                const previewW = Math.abs(tempPoint.x - drawingVoid.startX);
+                const previewH = Math.abs(tempPoint.y - drawingVoid.startY);
+                const tooSmall = previewW < MIN_VOID_SIZE || previewH < MIN_VOID_SIZE;
+                const overlaps = voids.some(v =>
+                    v.floorId === currentFloorId &&
+                    previewX < v.x + v.width && previewX + previewW > v.x &&
+                    previewY < v.y + v.height && previewY + previewH > v.y
+                );
+                const isInvalid = tooSmall || overlaps;
+                ctx.save();
+                const px = mmToPx(previewX);
+                const py = mmToPx(previewY);
+                const pw = mmToPx(previewW);
+                const ph = mmToPx(previewH);
+                ctx.fillStyle = isInvalid ? 'rgba(220, 38, 38, 0.1)' : 'rgba(34, 197, 94, 0.1)';
+                ctx.fillRect(px, py, pw, ph);
+                ctx.strokeStyle = isInvalid ? 'rgba(220, 38, 38, 0.6)' : 'rgba(34, 197, 94, 0.6)';
+                ctx.lineWidth = 1.5 / zoomLevel;
+                ctx.setLineDash([6 / zoomLevel, 3 / zoomLevel]);
+                ctx.strokeRect(px, py, pw, ph);
+                ctx.restore();
+                if (previewW > 0 && previewH > 0) {
+                    ctx.fillStyle = isInvalid ? '#dc2626' : '#16a34a';
+                    ctx.font = `${11 / zoomLevel}px Inter, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(
+                        `${Math.round(previewW / 10)}cm x ${Math.round(previewH / 10)}cm`,
+                        px + pw / 2, py + ph / 2
+                    );
+                }
+            }
+
             // Show snap indicator when hovering and ready to start drawing
             if (currentMousePos && currentMode === 'draw' && !drawingWall) {
                 drawSnapIndicator(currentMousePos.x, currentMousePos.y);
