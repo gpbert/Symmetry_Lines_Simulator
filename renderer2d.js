@@ -222,13 +222,12 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
                        isSelected ? '#2563eb' : '#6b7280';
     }
 
-    // Extended column positions have the direction offset baked in but still need the normal
-    // offset to move into the wall body. Non-extended need both direction + normal offsets.
+    // Extended: col is the final center, no offsets. Non-extended: standard offsets.
     const colAX = ext?.colA
-        ? colABase.x + (COLUMN_SIZE / 2) * wall.n.x
+        ? colABase.x
         : colABase.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
     const colAY = ext?.colA
-        ? colABase.y + (COLUMN_SIZE / 2) * wall.n.y
+        ? colABase.y
         : colABase.y + (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
     ctx.fillRect(
         mmToPx(colAX) - columnSize / 2,
@@ -238,10 +237,10 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     );
 
     const colBX = ext?.colB
-        ? colBBase.x + (COLUMN_SIZE / 2) * wall.n.x
+        ? colBBase.x
         : colBBase.x - (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
     const colBY = ext?.colB
-        ? colBBase.y + (COLUMN_SIZE / 2) * wall.n.y
+        ? colBBase.y
         : colBBase.y - (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
     ctx.fillRect(
         mmToPx(colBX) - columnSize / 2,
