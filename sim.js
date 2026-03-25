@@ -1629,10 +1629,10 @@ export function computeWallExtensions() {
 
                 const extPt = { x: targetX, y: pt.y };
 
-                // Column: at connection point, offset COLUMN_SIZE/2 toward wall body along X
-                const connectPt = dA < TOL ? other.pointA : other.pointB;
+                // Column: at extension endpoint (V's external face), offset COLUMN_SIZE/2 toward wall body
+                // This places the column just outside the vertical wall, flush with its external face
                 const col = {
-                    x: connectPt.x + towardBodyX * COLUMN_SIZE / 2,
+                    x: targetX + towardBodyX * COLUMN_SIZE / 2,
                     y: pt.y
                 };
 
