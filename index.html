@@ -3481,6 +3481,26 @@
                     };
                 }
                 
+                // Snap stretched wall length to 600mm grid
+                const otherPoint = stretchingEndpoint === 'A'
+                    ? { x: stretchingWall.pointB.x, y: stretchingWall.pointB.y }
+                    : { x: stretchingWall.pointA.x, y: stretchingWall.pointA.y };
+
+                const stretchDx = Math.abs(newPoint.x - otherPoint.x);
+                const stretchDy = Math.abs(newPoint.y - otherPoint.y);
+                const rawLength = Math.max(stretchDx, stretchDy);
+                const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+
+                if (snappedLength >= MIN_WALL_LENGTH) {
+                    if (isHorizontal) {
+                        const dir = newPoint.x > otherPoint.x ? 1 : -1;
+                        newPoint.x = otherPoint.x + dir * snappedLength;
+                    } else {
+                        const dir = newPoint.y > otherPoint.y ? 1 : -1;
+                        newPoint.y = otherPoint.y + dir * snappedLength;
+                    }
+                }
+
                 // Update the endpoint being stretched
                 if (stretchingEndpoint === 'A') {
                     stretchingWall.pointA = newPoint;
