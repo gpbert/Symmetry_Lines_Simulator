@@ -1618,29 +1618,34 @@ export function computeWallExtensions() {
                 const dB = Math.hypot(pt.x - other.pointB.x, pt.y - other.pointB.y);
                 if (dA >= TOL && dB >= TOL) continue;
 
-                // Connected to vertical wall. Find which face is furthest from H's body.
+                // Connected to vertical wall.
                 const vIntX = other.pointA.x;
                 const vExtX = other.pointA.x + other.n.x * other.thickness;
-                const targetX = Math.abs(vIntX - bodyPt.x) > Math.abs(vExtX - bodyPt.x)
+
+                // Determine convex vs concave:
+                // - Convex: V's external face is AWAY from H's body → extend outward
+                // - Concave: V's external face is TOWARD H's body → shorten inward
+                const targetXConvex = Math.abs(vIntX - bodyPt.x) > Math.abs(vExtX - bodyPt.x)
+                    ? vIntX : vExtX;
+                const targetXConcave = Math.abs(vIntX - bodyPt.x) <= Math.abs(vExtX - bodyPt.x)
                     ? vIntX : vExtX;
 
+                const isConvex = Math.sign(targetXConvex - pt.x) !== towardBodyX;
+                const targetX = isConvex ? targetXConvex : targetXConcave;
+
                 if (Math.abs(targetX - pt.x) < 1) break;
-                if (Math.sign(targetX - pt.x) === towardBodyX) break;
 
                 const extPt = { x: targetX, y: pt.y };
 
-                // Column: at V's internal face X, offset along Y to sit BESIDE V's column.
-                // V's column is offset toward V's body (away from connection point).
-                // H's column goes on the opposite side of the connection point.
                 const connectPt = dA < TOL ? other.pointA : other.pointB;
-                const otherBodyPt = dA < TOL ? other.pointB : other.pointA;
-                const towardVBodyY = Math.sign(otherBodyPt.y - connectPt.y);
+
                 // Column: compute FINAL center position. No renderer offsets needed.
-                // The column sits inside the corner, offset:
-                // - COLUMN_SIZE/2 OUTWARD from body along X (away from H's body)
-                // - wall.n * COLUMN_SIZE/2 (into the wall thickness)
+                // Convex: column outward from connectPt (away from body)
+                // Concave: column at shortened endpoint, offset toward body
                 const col = {
-                    x: connectPt.x - towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
+                    x: isConvex
+                        ? connectPt.x - towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2
+                        : targetX + towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
                     y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
                 };
 
