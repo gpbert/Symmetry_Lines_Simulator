@@ -2296,6 +2296,17 @@
             return null;
         }
         
+        function getVoidAtPoint(x, y, floorId) {
+            for (let i = voids.length - 1; i >= 0; i--) {
+                const v = voids[i];
+                if (v.floorId !== floorId) continue;
+                if (x >= v.x && x <= v.x + v.width && y >= v.y && y <= v.y + v.height) {
+                    return v;
+                }
+            }
+            return null;
+        }
+
         // Draw building envelopes (waffle slabs) with cross-floor visibility
         function drawBuildingEnvelopes() {
             const showLevelsBelow = document.getElementById('showOtherFloors').checked;
@@ -3916,10 +3927,12 @@
                             // Add to selection
                             selectedWalls.push(clickedWall);
                         }
+                        selectedVoid = null;
                     } else if (clickedWall) {
                         // Single select
                         selectedWalls = [clickedWall];
-                        
+                        selectedVoid = null;
+
                         // Start dragging
                         isDragging = true;
                         dragStartPos = pos;
@@ -3931,8 +3944,14 @@
                         };
                         canvas.style.cursor = 'grabbing';
                     } else {
-                        // Clicked on empty space - clear selection
-                        selectedWalls = [];
+                        const clickedVoid = getVoidAtPoint(pos.x, pos.y, currentFloorId);
+                        if (clickedVoid) {
+                            selectedWalls = [];
+                            selectedVoid = clickedVoid;
+                        } else {
+                            selectedWalls = [];
+                            selectedVoid = null;
+                        }
                     }
                 }
                 
@@ -3956,6 +3975,18 @@
                         showToast('Deleted 1 wall', 'info', 2000);
                         updateUI();
                         validateAllWalls();
+                    }
+                }
+                if (!clickedWall) {
+                    const clickedVoid = getVoidAtPoint(pos.x, pos.y, currentFloorId);
+                    if (clickedVoid) {
+                        const idx = voids.indexOf(clickedVoid);
+                        if (idx !== -1) {
+                            voids.splice(idx, 1);
+                            addVoidDeletionToHistory(clickedVoid);
+                            showToast('Void deleted', 'info', 2000);
+                            draw();
+                        }
                     }
                 }
             } else if (currentMode === 'void') {
@@ -4009,6 +4040,8 @@
             tempPoint = null;
             wallFlipped = false;
             selectedWalls = [];
+            drawingVoid = null;
+            selectedVoid = null;
             clearDrawingToast();
             updateModeUI();
             draw();
@@ -4019,6 +4052,8 @@
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+            drawingVoid = null;
+            selectedVoid = null;
             clearDrawingToast();
             updateModeUI();
         });
@@ -4031,6 +4066,8 @@
                 // Use filter to avoid index shifting issues when deleting multiple walls
                 walls = walls.filter(wall => !selectedWalls.includes(wall));
                 selectedWalls = [];
+                drawingVoid = null;
+                selectedVoid = null;
                 updateBuildingEnvelopes(); // Update slabs after deletion
                 showToast(`Deleted ${count} wall${count > 1 ? 's' : ''}`, 'info', 2000);
                 updateUI();
@@ -4042,6 +4079,8 @@
                 tempPoint = null;
                 wallFlipped = false;
                 selectedWalls = [];
+                drawingVoid = null;
+                selectedVoid = null;
                 clearDrawingToast();
                 updateModeUI();
                 draw();
