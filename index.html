@@ -1134,6 +1134,26 @@
             return Math.round(value / gridSize) * gridSize;
         }
 
+        // Snap a wall length to the nearest lower multiple of WALL_LENGTH_GRID
+        function snapLengthToGrid(startPoint, endPoint) {
+            const dx = endPoint.x - startPoint.x;
+            const dy = endPoint.y - startPoint.y;
+
+            if (Math.abs(dx) > Math.abs(dy)) {
+                const rawLength = Math.abs(dx);
+                const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+                if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
+                const direction = dx > 0 ? 1 : -1;
+                return { x: startPoint.x + direction * snappedLength, y: startPoint.y };
+            } else {
+                const rawLength = Math.abs(dy);
+                const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+                if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
+                const direction = dy > 0 ? 1 : -1;
+                return { x: startPoint.x, y: startPoint.y + direction * snappedLength };
+            }
+        }
+
         function mmToPx(mm) {
             return mm * MM_TO_PX;
         }
@@ -3498,14 +3518,15 @@
                 // Constrain to horizontal or vertical only
                 const dx = Math.abs(pos.x - drawingWall.x);
                 const dy = Math.abs(pos.y - drawingWall.y);
-                
+
+                let constrained;
                 if (dx > dy) {
-                    // Horizontal wall
-                    tempPoint = { x: pos.x, y: drawingWall.y };
+                    constrained = { x: pos.x, y: drawingWall.y };
                 } else {
-                    // Vertical wall
-                    tempPoint = { x: drawingWall.x, y: pos.y };
+                    constrained = { x: drawingWall.x, y: pos.y };
                 }
+
+                tempPoint = snapLengthToGrid(drawingWall, constrained);
             }
             draw();
         });
@@ -3569,7 +3590,10 @@
                     } else {
                         finalPos = { x: drawingWall.x, y: pos.y };
                     }
-                    
+
+                    // Snap wall length to 600mm grid
+                    finalPos = snapLengthToGrid(drawingWall, finalPos);
+
                     // Apply flip by swapping start/end if flipped
                     const startX = wallFlipped ? finalPos.x : drawingWall.x;
                     const startY = wallFlipped ? finalPos.y : drawingWall.y;
