@@ -30,6 +30,7 @@ interaction.js    — shared mouse/keyboard handlers for tools (create)
 - Undo/redo: `addToHistory`, `undo`, `redo`, `addVoidDeletionToHistory` (lines 818-928)
 - Grid helpers: `snapToGrid`, `snapToVoidGrid`, `snapLengthToGrid` (lines 1184-1211)
 - Void helpers: `generateVoidId`, `getVoidAtPoint`, `getVoidResizeHandle` (lines 813-830, 2299-2329)
+- Geometric queries: `getEndpointNearPoint` (lines 2270-2297) — wall endpoint hit-testing, used by both rendering and interaction
 - Envelope detection: `detectBuildingEnvelopes`, `updateBuildingEnvelopes`, `pointNearLineSegment`, `pointInPolygon`, `getWallSlabSystem`, `envelopesOverlap`, `getConnectedSlabSystems`, `areWallsInSameSlabSystem`, `getPredictedSlabSystemForPreviewWall` (lines 1414-1912)
 - Validation: `validateWall`, `validateAllWalls`, `validateEnvelopeAngles`, `validateVoidWallProximity`, `isWallInRestrictedZone`, `isWallInEnvelope` (lines 2016-2162, 3310-3668)
 - Restricted zone calculation: `getRestrictedZones` (lines 1294-1376)
@@ -44,8 +45,8 @@ interaction.js    — shared mouse/keyboard handlers for tools (create)
 - Void drawing: `drawVoid` (lines 2432-2466)
 - Snap indicator: `drawSnapIndicator` (lines 3715-3732)
 - Main draw function: `draw` (lines 2468-3308)
-- Endpoint detection: `getEndpointNearPoint` (lines 2270-2297) — needed for rendering handles
 - Pan/zoom state: `panOffset`, `zoomLevel`
+- `MM_TO_PX` constant (line 661) — 2D-specific, does NOT go in `sim.js`
 - `screenToWorld(event)` — extracted from `getMousePosition` (lines 3691-3713)
 
 **`interaction.js`** (extracted from index.html):
@@ -287,8 +288,6 @@ export const renderer2D = {
     activate() { ... },
     deactivate() { ... },
     screenToWorld(event) { ... },
-    // Expose for interaction.js
-    getEndpointNearPoint(x, y, threshold) { ... },
     get panOffset() { return panOffset; },
     get zoomLevel() { return zoomLevel; },
 };
@@ -307,10 +306,33 @@ Move into `renderer2d.js` as module-level functions:
 - `drawWall`
 - `drawVoid`
 - `drawSnapIndicator`
-- `getEndpointNearPoint`
 - The main `draw` function
 
+Also add `MM_TO_PX` as a module-level constant in `renderer2d.js`:
+```javascript
+const MM_TO_PX = 0.15; // 2D-specific scale factor
+```
+
 Each function reads from `sim.state` instead of bare variables. Drawing functions use the module-level `ctx`, `canvas`, `panOffset`, `zoomLevel`.
+
+**Important — interaction state during Task 5:** The `draw()` function reads interaction state variables (`drawingWall`, `tempPoint`, `wallFlipped`, `drawingVoid`, `stretchingWall`, `currentMousePos`, `currentMouseScreenPos`) for preview rendering. These variables are NOT yet in `interaction.js` (that's Task 6). During Task 5, keep these variables in `index.html` scope and have `renderer2d.js` read them via a setter:
+
+```javascript
+// renderer2d.js
+let _interactionState = {};
+export function setInteractionState(state) { _interactionState = state; }
+```
+
+In index.html, after the interaction variables are still declared there:
+```javascript
+renderer2D.setInteractionState({
+    get drawingWall() { return drawingWall; },
+    get tempPoint() { return tempPoint; },
+    // ... etc
+});
+```
+
+In Task 6, this gets replaced with the proper `interactionState` import from `interaction.js`.
 
 - [ ] **Step 4: Implement the renderer interface methods**
 
@@ -344,6 +366,8 @@ screenToWorld(event) {
     const worldY = (canvasY - panOffset.y) / zoomLevel;
     let x = pxToMm(worldX);
     let y = pxToMm(worldY);
+    // Always snaps to 300mm external grid. Void mode callers re-snap
+    // to VOID_GRID (600mm) at the call site in interaction.js.
     x = sim.snapToGrid(x, sim.GRID_SIZE_EXTERNAL);
     y = sim.snapToGrid(y, sim.GRID_SIZE_EXTERNAL);
     return { x, y, screenX: canvasX, screenY: canvasY };
@@ -414,12 +438,15 @@ export const interactionState = {
     get currentMouseScreenPos() { return currentMouseScreenPos; },
 };
 
+let getRenderer = null;
+
 export function initInteraction(getActiveRenderer, toastFn) {
-    activeRenderer = null;
+    getRenderer = getActiveRenderer;
     showToast = toastFn;
-    // Store getter so we always get the current active renderer
-    Object.defineProperty(module, '_getRenderer', { get: () => getActiveRenderer });
 }
+
+// Helper — always returns the current active renderer
+function renderer() { return getRenderer(); }
 
 export function bindToCanvas(canvasElement) {
     canvasElement.addEventListener('mouseup', onMouseUp);
