@@ -2596,6 +2596,49 @@
                 }
             });
 
+            // Draw void proximity restricted face zones (purple) when in void mode
+            if (currentMode === 'void') {
+                const floorWalls = walls.filter(w => w.floorId === currentFloorId);
+                floorWalls.forEach(wall => {
+                    const isInEnvelope = isWallInEnvelope(wall);
+                    const faceOffset = isInEnvelope ? wall.thickness : 0;
+                    const zoneDepth = VOID_GRID;
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
+                    const ax = wall.pointA.x + wall.n.x * faceOffset;
+                    const ay = wall.pointA.y + wall.n.y * faceOffset;
+                    const bx = wall.pointB.x + wall.n.x * faceOffset;
+                    const by = wall.pointB.y + wall.n.y * faceOffset;
+                    const nx = wall.n.x * (isInEnvelope ? 1 : -1);
+                    const ny = wall.n.y * (isInEnvelope ? 1 : -1);
+                    ctx.beginPath();
+                    ctx.moveTo(mmToPx(ax), mmToPx(ay));
+                    ctx.lineTo(mmToPx(bx), mmToPx(by));
+                    ctx.lineTo(mmToPx(bx + nx * zoneDepth), mmToPx(by + ny * zoneDepth));
+                    ctx.lineTo(mmToPx(ax + nx * zoneDepth), mmToPx(ay + ny * zoneDepth));
+                    ctx.closePath();
+                    ctx.fill();
+                    // Hatch pattern
+                    ctx.strokeStyle = 'rgba(168, 85, 247, 0.15)';
+                    ctx.lineWidth = 1 / zoomLevel;
+                    const step = 10 / zoomLevel;
+                    ctx.beginPath();
+                    ctx.save();
+                    ctx.clip();
+                    const minPx = Math.min(mmToPx(ax), mmToPx(bx), mmToPx(ax + nx * zoneDepth), mmToPx(bx + nx * zoneDepth));
+                    const maxPx = Math.max(mmToPx(ax), mmToPx(bx), mmToPx(ax + nx * zoneDepth), mmToPx(bx + nx * zoneDepth));
+                    const minPy = Math.min(mmToPx(ay), mmToPx(by), mmToPx(ay + ny * zoneDepth), mmToPx(by + ny * zoneDepth));
+                    const maxPy = Math.max(mmToPx(ay), mmToPx(by), mmToPx(ay + ny * zoneDepth), mmToPx(by + ny * zoneDepth));
+                    for (let i = minPx - (maxPy - minPy); i < maxPx + (maxPy - minPy); i += step) {
+                        ctx.moveTo(i, minPy);
+                        ctx.lineTo(i + (maxPy - minPy), maxPy);
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                    ctx.restore();
+                });
+            }
+
             // Draw current floor voids
             voids.filter(v => v.floorId === currentFloorId).forEach(v => {
                 drawVoid(v);
@@ -3480,6 +3523,82 @@
             return violations;
         }
 
+        function isWallInEnvelope(wall) {
+            const wallIdx = walls.indexOf(wall);
+            return buildingEnvelopes.some(env =>
+                env.wallIndices && env.wallIndices.includes(wallIdx)
+            );
+        }
+
+        function validateVoidWallProximity(v) {
+            const violations = [];
+            const floorWalls = walls.filter(w => w.floorId === v.floorId);
+            floorWalls.forEach(wall => {
+                const isInEnvelope = isWallInEnvelope(wall);
+                const wallMinX = Math.min(wall.pointA.x, wall.pointB.x);
+                const wallMaxX = Math.max(wall.pointA.x, wall.pointB.x);
+                const wallMinY = Math.min(wall.pointA.y, wall.pointB.y);
+                const wallMaxY = Math.max(wall.pointA.y, wall.pointB.y);
+                const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+                let overlapAlongAxis = false;
+                if (isHorizontal) {
+                    overlapAlongAxis = v.x < wallMaxX && v.x + v.width > wallMinX;
+                } else {
+                    overlapAlongAxis = v.y < wallMaxY && v.y + v.height > wallMinY;
+                }
+                if (!overlapAlongAxis) return;
+                const adjacencyTolerance = 10;
+                let touchesInternalFace = false;
+                let touchesExternalFace = false;
+                if (isHorizontal) {
+                    const internalY = wall.pointA.y;
+                    const externalY = wall.pointA.y + wall.n.y * wall.thickness;
+                    const voidTop = v.y;
+                    const voidBottom = v.y + v.height;
+                    touchesInternalFace =
+                        Math.abs(voidBottom - internalY) < adjacencyTolerance ||
+                        Math.abs(voidTop - internalY) < adjacencyTolerance ||
+                        (voidTop < internalY && voidBottom > internalY);
+                    touchesExternalFace =
+                        Math.abs(voidBottom - externalY) < adjacencyTolerance ||
+                        Math.abs(voidTop - externalY) < adjacencyTolerance ||
+                        (voidTop < externalY && voidBottom > externalY);
+                } else {
+                    const internalX = wall.pointA.x;
+                    const externalX = wall.pointA.x + wall.n.x * wall.thickness;
+                    const voidLeft = v.x;
+                    const voidRight = v.x + v.width;
+                    touchesInternalFace =
+                        Math.abs(voidRight - internalX) < adjacencyTolerance ||
+                        Math.abs(voidLeft - internalX) < adjacencyTolerance ||
+                        (voidLeft < internalX && voidRight > internalX);
+                    touchesExternalFace =
+                        Math.abs(voidRight - externalX) < adjacencyTolerance ||
+                        Math.abs(voidLeft - externalX) < adjacencyTolerance ||
+                        (voidLeft < externalX && voidRight > externalX);
+                }
+                if (!touchesInternalFace && !touchesExternalFace) return;
+                if (isInEnvelope) {
+                    if (touchesExternalFace) {
+                        violations.push({
+                            type: 'error',
+                            message: 'Void must be on the column face of external walls',
+                            wallIndex: walls.indexOf(wall)
+                        });
+                    }
+                } else {
+                    if (touchesInternalFace) {
+                        violations.push({
+                            type: 'error',
+                            message: 'Void must be on the non-column face of internal walls',
+                            wallIndex: walls.indexOf(wall)
+                        });
+                    }
+                }
+            });
+            return violations;
+        }
+
         function validateEnvelopeAngles() {
             const violations = [];
             buildingEnvelopes.forEach(envelope => {
@@ -3532,6 +3651,17 @@
                     violations: [{ type: 'error', message: v.message }],
                     point: v.point
                 });
+            });
+
+            // Validate void-wall proximity (Rule 7)
+            voids.forEach((v, idx) => {
+                const voidViolations = validateVoidWallProximity(v);
+                if (voidViolations.length > 0) {
+                    allViolations.push({
+                        voidIndex: idx,
+                        violations: voidViolations
+                    });
+                }
             });
 
             // displayViolations removed as validation results panel no longer exists
@@ -4125,6 +4255,13 @@
                         x: x, y: y,
                         width: width, height: height
                     };
+                    const proximityViolations = validateVoidWallProximity(newVoid);
+                    if (proximityViolations.length > 0) {
+                        showToast(proximityViolations[0].message, 'error');
+                        drawingVoid = null;
+                        draw();
+                        return;
+                    }
                     voids.push(newVoid);
                     addToHistory([newVoid], 'void');
                     drawingVoid = null;
