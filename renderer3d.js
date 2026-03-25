@@ -429,27 +429,40 @@ function buildWallMesh(wall, group, material, idx, wallViolations, ext) {
 
     group.add(mesh);
 
-    // Steel columns at endpoints (use extended column positions if available)
-    const colAPos = ext?.colA || effectiveA;
-    const colBPos = ext?.colB || effectiveB;
-
+    // Steel columns at endpoints
+    // Extended columns: col is the final center position (no offsets needed)
+    // Non-extended columns: offset by dNorm*COLUMN_SIZE/2 + n*COLUMN_SIZE/2
     const colSize = mmToUnits(COLUMN_SIZE);
     const colGeo = new THREE.BoxGeometry(colSize, wallHeight + 0.02, colSize);
 
+    const colAX = ext?.colA
+        ? ext.colA.x
+        : effectiveA.x + (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
+    const colAY = ext?.colA
+        ? ext.colA.y
+        : effectiveA.y + (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
+
     const colA = new THREE.Mesh(colGeo, materials.column);
     colA.position.set(
-        mmToUnits(colAPos.x),
+        mmToUnits(colAX),
         floorY + wallHeight / 2,
-        mmToUnits(colAPos.y)
+        mmToUnits(colAY)
     );
     colA.castShadow = true;
     group.add(colA);
 
+    const colBX = ext?.colB
+        ? ext.colB.x
+        : effectiveB.x - (COLUMN_SIZE / 2) * wall.dNorm.x + (COLUMN_SIZE / 2) * wall.n.x;
+    const colBY = ext?.colB
+        ? ext.colB.y
+        : effectiveB.y - (COLUMN_SIZE / 2) * wall.dNorm.y + (COLUMN_SIZE / 2) * wall.n.y;
+
     const colB = new THREE.Mesh(colGeo, materials.column);
     colB.position.set(
-        mmToUnits(colBPos.x),
+        mmToUnits(colBX),
         floorY + wallHeight / 2,
-        mmToUnits(colBPos.y)
+        mmToUnits(colBY)
     );
     colB.castShadow = true;
     group.add(colB);
