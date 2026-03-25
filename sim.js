@@ -1621,33 +1621,39 @@ export function computeWallExtensions() {
                 // Connected to vertical wall.
                 const vIntX = other.pointA.x;
                 const vExtX = other.pointA.x + other.n.x * other.thickness;
-
-                // Determine convex vs concave:
-                // - Convex: V's external face is AWAY from H's body → extend outward
-                // - Concave: V's external face is TOWARD H's body → shorten inward
-                const targetXConvex = Math.abs(vIntX - bodyPt.x) > Math.abs(vExtX - bodyPt.x)
-                    ? vIntX : vExtX;
-                const targetXConcave = Math.abs(vIntX - bodyPt.x) <= Math.abs(vExtX - bodyPt.x)
-                    ? vIntX : vExtX;
-
-                const isConvex = Math.sign(targetXConvex - pt.x) !== towardBodyX;
-                const targetX = isConvex ? targetXConvex : targetXConcave;
-
-                if (Math.abs(targetX - pt.x) < 1) break;
-
-                const extPt = { x: targetX, y: pt.y };
-
                 const connectPt = dA < TOL ? other.pointA : other.pointB;
 
-                // Column: compute FINAL center position. No renderer offsets needed.
-                // Convex: column outward from connectPt (away from body)
-                // Concave: column at shortened endpoint, offset toward body
-                const col = {
-                    x: isConvex
-                        ? connectPt.x - towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2
-                        : targetX + towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
-                    y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
-                };
+                // The face FURTHEST from H's body (for convex extension)
+                const farFace = Math.abs(vIntX - bodyPt.x) > Math.abs(vExtX - bodyPt.x) ? vIntX : vExtX;
+                // The face CLOSEST to H's body (for concave shortening)
+                const nearFace = Math.abs(vIntX - bodyPt.x) <= Math.abs(vExtX - bodyPt.x) ? vIntX : vExtX;
+
+                // Convex: farFace is on the opposite side of connectPt from body
+                // Concave: farFace is on the same side as body (can't extend outward)
+                const isConvex = Math.sign(farFace - pt.x) !== towardBodyX && Math.abs(farFace - pt.x) > 1;
+
+                let targetX, extPt, col;
+
+                if (isConvex) {
+                    // Extend outward to far face
+                    targetX = farFace;
+                    extPt = { x: targetX, y: pt.y };
+                    // Column: outward from connectPt
+                    col = {
+                        x: connectPt.x - towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
+                        y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
+                    };
+                } else {
+                    // Shorten inward to near face (V's external face on body side)
+                    targetX = nearFace;
+                    if (Math.abs(targetX - pt.x) < 1) break; // already at the right position
+                    extPt = { x: targetX, y: pt.y };
+                    // Column: at shortened end, offset toward body
+                    col = {
+                        x: targetX + towardBodyX * COLUMN_SIZE / 2 + wall.n.x * COLUMN_SIZE / 2,
+                        y: connectPt.y + wall.n.y * COLUMN_SIZE / 2
+                    };
+                }
 
 
                 if (ep === 'A') { ext.extA = extPt; ext.colA = col; }
