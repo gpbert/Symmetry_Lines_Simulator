@@ -549,9 +549,13 @@ function buildEnvelopes() {
         const floorY = getFloorY(env.floorId);
         const mat = isCurrent ? materials.slab : materials.slabGhost;
 
-        // Use the raw envelope polygon directly (matching 2D view).
-        // Use THREE.Shape + ExtrudeGeometry for proper concave polygon triangulation.
-        function makeSlabMesh(yPos, thickness, material) {
+        // Build slab in world space to avoid rotation offset issues.
+        // Use THREE.ShapeGeometry for proper concave triangulation (earcut),
+        // then transform the vertices to world XZ plane at the correct Y heights.
+        function makeSlabMesh(yTop, thickness, material) {
+            const yBottom = yTop - thickness;
+
+            // Create shape for triangulation (in 2D: shape X = world X, shape Y = world Z)
             const shape = new THREE.Shape();
             const p0 = env.polygon[0];
             shape.moveTo(mmToUnits(p0.x), mmToUnits(p0.y));
@@ -560,18 +564,66 @@ function buildEnvelopes() {
             }
             shape.closePath();
 
-            const geo = new THREE.ExtrudeGeometry(shape, {
-                depth: thickness,
-                bevelEnabled: false,
-            });
+            // Get triangulated face indices from ShapeGeometry
+            const shapeGeo = new THREE.ShapeGeometry(shape);
+            const shapePos = shapeGeo.attributes.position;
+            const shapeIdx = shapeGeo.index ? shapeGeo.index.array : null;
+            const nVerts = shapePos.count;
+
+            // Build world-space geometry with top + bottom faces + side walls
+            const positions = [];
+            const indices = [];
+
+            // Bottom face vertices: 0..nVerts-1
+            for (let i = 0; i < nVerts; i++) {
+                positions.push(shapePos.getX(i), yBottom, shapePos.getY(i));
+            }
+            // Top face vertices: nVerts..2*nVerts-1
+            for (let i = 0; i < nVerts; i++) {
+                positions.push(shapePos.getX(i), yTop, shapePos.getY(i));
+            }
+
+            // Bottom face triangles (from ShapeGeometry, reversed winding for downward normal)
+            if (shapeIdx) {
+                for (let i = 0; i < shapeIdx.length; i += 3) {
+                    indices.push(shapeIdx[i], shapeIdx[i + 2], shapeIdx[i + 1]);
+                }
+                // Top face triangles (normal winding for upward normal)
+                for (let i = 0; i < shapeIdx.length; i += 3) {
+                    indices.push(shapeIdx[i] + nVerts, shapeIdx[i + 1] + nVerts, shapeIdx[i + 2] + nVerts);
+                }
+            }
+
+            // Side faces — use the original polygon vertices (not ShapeGeometry vertices)
+            const n = env.polygon.length;
+            const sideBase = positions.length / 3;
+            // Add polygon vertices for sides (bottom then top)
+            for (let i = 0; i < n; i++) {
+                const px = mmToUnits(env.polygon[i].x);
+                const pz = mmToUnits(env.polygon[i].y);
+                positions.push(px, yBottom, pz);
+            }
+            for (let i = 0; i < n; i++) {
+                const px = mmToUnits(env.polygon[i].x);
+                const pz = mmToUnits(env.polygon[i].y);
+                positions.push(px, yTop, pz);
+            }
+            for (let i = 0; i < n; i++) {
+                const i2 = (i + 1) % n;
+                const b0 = sideBase + i, b1 = sideBase + i2;
+                const t0 = sideBase + n + i, t1 = sideBase + n + i2;
+                indices.push(b0, b1, t1);
+                indices.push(b0, t1, t0);
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geo.setIndex(indices);
+            geo.computeVertexNormals();
+
+            shapeGeo.dispose();
 
             const mesh = new THREE.Mesh(geo, material);
-            // Shape is on XY plane, extrusion goes along +Z.
-            // Rotate so shape maps to XZ (floor) plane and extrusion goes along -Y.
-            mesh.rotation.x = -Math.PI / 2;
-            // After rotation: shape X → world X, shape Y → world Z, extrusion Z → world -Y
-            // Position so the TOP of the slab is at yPos (extrusion goes downward)
-            mesh.position.y = yPos;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             return mesh;
