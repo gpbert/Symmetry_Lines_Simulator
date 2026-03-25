@@ -542,18 +542,22 @@ function buildEnvelopes() {
         const extrudeSettings = { depth: SLAB_THICKNESS, bevelEnabled: false };
 
         // Floor slab: sits below the wall base (floorY - SLAB_THICKNESS to floorY)
+        // After rotation.x = -PI/2, extrusion goes downward (local +Z → world -Y)
+        // So position.y = floorY means bottom of slab = floorY - SLAB_THICKNESS
         const floorSlabGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
         const floorSlabMesh = new THREE.Mesh(floorSlabGeo, mat);
-        // Rotate so XY shape maps to XZ floor plane, Z extrusion maps to Y (vertical)
         floorSlabMesh.rotation.x = -Math.PI / 2;
-        floorSlabMesh.position.y = floorY - SLAB_THICKNESS;
+        floorSlabMesh.position.y = floorY;
+        floorSlabMesh.castShadow = true;
+        floorSlabMesh.receiveShadow = true;
         envelopeGroup.add(floorSlabMesh);
 
-        // Roof slab: sits above the wall tops (floorY + FLOOR_HEIGHT_UNITS to + SLAB_THICKNESS)
+        // Roof slab: sits above the wall tops (floorY + wallHeight to floorY + wallHeight + SLAB_THICKNESS)
+        // position.y = floorY + FLOOR_HEIGHT_UNITS + SLAB_THICKNESS so it extrudes down to wall top
         const roofSlabGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
         const roofSlabMesh = new THREE.Mesh(roofSlabGeo, mat);
         roofSlabMesh.rotation.x = -Math.PI / 2;
-        roofSlabMesh.position.y = floorY + FLOOR_HEIGHT_UNITS;
+        roofSlabMesh.position.y = floorY + FLOOR_HEIGHT_UNITS + SLAB_THICKNESS;
         envelopeGroup.add(roofSlabMesh);
     });
 }
@@ -591,7 +595,33 @@ function buildZonePlane(wall, faceOffset, normalDir, zoneDepth, color, opacity, 
     const centerX = midFaceX + nx * zoneDepth / 2;
     const centerY = midFaceY + ny * zoneDepth / 2;
 
-    const geo = new THREE.PlaneGeometry(mmToUnits(zoneDepth), mmToUnits(wall.length));
+    // Build the zone as a flat quad using BufferGeometry to avoid rotation issues
+    // Four corners in world space (XZ plane at floorY)
+    const halfLen = wall.length / 2;
+    const dNormX = wall.dNorm ? wall.dNorm.x : wall.d.x / wall.length;
+    const dNormY = wall.dNorm ? wall.dNorm.y : wall.d.y / wall.length;
+
+    // Face midpoint → offset by half zone depth in normal direction
+    // Corner positions in mm:
+    // c0 = faceA, c1 = faceB, c2 = faceB + normal*depth, c3 = faceA + normal*depth
+    const c0x = ax, c0y = ay;
+    const c1x = bx, c1y = by;
+    const c2x = bx + nx * zoneDepth, c2y = by + ny * zoneDepth;
+    const c3x = ax + nx * zoneDepth, c3y = ay + ny * zoneDepth;
+
+    const vertices = new Float32Array([
+        mmToUnits(c0x), floorY + 0.005, mmToUnits(c0y),
+        mmToUnits(c1x), floorY + 0.005, mmToUnits(c1y),
+        mmToUnits(c2x), floorY + 0.005, mmToUnits(c2y),
+        mmToUnits(c3x), floorY + 0.005, mmToUnits(c3y),
+    ]);
+    const indices = [0, 1, 2, 0, 2, 3];
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+
     const mat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
@@ -599,14 +629,6 @@ function buildZonePlane(wall, faceOffset, normalDir, zoneDepth, color, opacity, 
         side: THREE.DoubleSide,
     });
     const zoneMesh = new THREE.Mesh(geo, mat);
-    zoneMesh.rotation.x = -Math.PI / 2;
-    zoneMesh.rotation.z = -Math.atan2(wall.d.x, wall.d.y);
-
-    zoneMesh.position.set(
-        mmToUnits(centerX),
-        floorY + 0.005,
-        mmToUnits(centerY)
-    );
 
     zoneGroup.add(zoneMesh);
 }
@@ -689,8 +711,14 @@ function buildPreview() {
             const thkU = mmToUnits(thickness);
             const htU = mmToUnits(height);
 
+            // Check if preview wall would be in a restricted zone
+            const previewWall = new sim.Wall(startX, startY, finX, finY, thickness, height, null, state.currentFloorId);
+            const restriction = sim.isWallInRestrictedZone(previewWall);
+            const isRestricted = restriction && restriction.restricted;
+            const previewMat = isRestricted ? materials.previewVoidInvalid : materials.previewWall;
+
             const geo = new THREE.BoxGeometry(thkU, htU, lenU);
-            const mesh = new THREE.Mesh(geo, materials.previewWall);
+            const mesh = new THREE.Mesh(geo, previewMat);
 
             // Direction and normal for preview wall
             const dNormX = wallDx / wallLength;
