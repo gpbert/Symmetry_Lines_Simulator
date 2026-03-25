@@ -658,11 +658,18 @@
         const WALL_LENGTH_GRID = 600; // mm - wall lengths must be multiples of this
         const MIN_DISTANCE_PARALLEL = 600; // mm
         const MIN_DISTANCE_OPPOSITE = 1200; // mm
+        const VOID_GRID = 600; // mm - voids snap to 600mm grid
+        const MIN_VOID_SIZE = 600; // mm - minimum void dimension
 
         // State
         let walls = [];
+        let voids = []; // Array of {id, floorId, x, y, width, height}
+        let selectedVoid = null; // Currently selected void (only one at a time)
+        let drawingVoid = null; // Void being drawn {startX, startY}
+        let resizingVoid = null; // {void, handle} — handle is 'n','s','e','w','ne','nw','se','sw'
+        let originalVoidState = null; // For undo during resize
         let selectedWalls = []; // Array to support multi-select
-        let currentMode = 'draw'; // 'draw', 'select', 'delete'
+        let currentMode = 'draw'; // 'draw', 'select', 'delete', 'void'
         let drawingWall = null;
         let tempPoint = null;
         let wallFlipped = false; // Track if wall is flipped during drawing
@@ -795,37 +802,48 @@
         // Redo history
         let redoHistory = [];
 
+        // Void ID generator
+        let nextVoidId = 1;
+        function generateVoidId() {
+            return 'void-' + (nextVoidId++);
+        }
+
         // Undo functionality
         function undo() {
             if (history.length === 0) {
                 showToast('Nothing to undo', 'info', 2000);
                 return;
             }
-            
-            // Get the last operation
             const lastOperation = history.pop();
-            
-            // Remove the walls from this operation
-            lastOperation.wallIndices.forEach(index => {
-                // Find and remove by comparing wall properties
-                // (indices may have shifted, so we match by wall object)
-                const wallIndex = walls.indexOf(lastOperation.walls[lastOperation.wallIndices.indexOf(index)]);
-                if (wallIndex !== -1) {
-                    walls.splice(wallIndex, 1);
-                }
-            });
-            
-            // Add to redo history
-            redoHistory.push(lastOperation);
-            if (redoHistory.length > MAX_HISTORY) {
-                redoHistory.shift();
+            if (lastOperation.objectType === 'void') {
+                lastOperation.voids.forEach(v => {
+                    const idx = voids.indexOf(v);
+                    if (idx !== -1) voids.splice(idx, 1);
+                });
+                selectedVoid = null;
+            } else if (lastOperation.objectType === 'void-delete') {
+                const vd = lastOperation.voidData;
+                voids.push({ id: vd.id, floorId: vd.floorId, x: vd.x, y: vd.y, width: vd.width, height: vd.height });
+                selectedVoid = null;
+            } else if (lastOperation.objectType === 'void-resize') {
+                const v = lastOperation.voidRef;
+                v.x = lastOperation.oldState.x;
+                v.y = lastOperation.oldState.y;
+                v.width = lastOperation.oldState.width;
+                v.height = lastOperation.oldState.height;
+                selectedVoid = null;
+            } else {
+                lastOperation.wallIndices.forEach(index => {
+                    const wallIndex = walls.indexOf(lastOperation.walls[lastOperation.wallIndices.indexOf(index)]);
+                    if (wallIndex !== -1) walls.splice(wallIndex, 1);
+                });
+                selectedWalls = [];
             }
-            
-            selectedWalls = [];
-            updateBuildingEnvelopes(); // Update slabs after undo
+            redoHistory.push(lastOperation);
+            if (redoHistory.length > MAX_HISTORY) redoHistory.shift();
+            updateBuildingEnvelopes();
             updateUI();
             draw();
-            
             showToast('Undo', 'info', 2000);
         }
 
@@ -835,46 +853,72 @@
                 showToast('Nothing to redo', 'info', 2000);
                 return;
             }
-            
-            // Get the last undone operation
             const operation = redoHistory.pop();
-            
-            // Re-add the walls
-            operation.walls.forEach(wall => {
-                walls.push(wall);
-            });
-            
-            // Add back to undo history
-            addToHistory(operation.walls);
-            
+            if (operation.objectType === 'void') {
+                operation.voids.forEach(v => voids.push(v));
+            } else if (operation.objectType === 'void-delete') {
+                const idx = voids.findIndex(v => v.id === operation.voidData.id);
+                if (idx !== -1) voids.splice(idx, 1);
+            } else if (operation.objectType === 'void-resize') {
+                const v = operation.voidRef;
+                v.x = operation.newState.x;
+                v.y = operation.newState.y;
+                v.width = operation.newState.width;
+                v.height = operation.newState.height;
+            } else {
+                operation.walls.forEach(wall => walls.push(wall));
+            }
+            // Push directly to history (do NOT call addToHistory — it clears redoHistory)
+            history.push(operation);
+            if (history.length > MAX_HISTORY) history.shift();
             selectedWalls = [];
-            updateBuildingEnvelopes(); // Update slabs after redo
+            selectedVoid = null;
+            updateBuildingEnvelopes();
             updateUI();
             draw();
-            
             showToast('Redo', 'info', 2000);
         }
 
-        // Add walls to history
-        function addToHistory(addedWalls = []) {
-            // If no walls provided, save current state for undo
-            const wallsToSave = addedWalls.length > 0 ? addedWalls : [...walls];
-            
+        // Add items to history
+        function addToHistory(addedItems = [], objectType = 'wall') {
             const operation = {
-                walls: wallsToSave,
-                wallIndices: wallsToSave.map(w => walls.indexOf(w)),
+                objectType: objectType,
+                items: addedItems,
                 timestamp: Date.now()
             };
-            
+            if (objectType === 'wall') {
+                // If no walls provided, save current state for undo
+                const wallsToSave = addedItems.length > 0 ? addedItems : [...walls];
+                operation.walls = wallsToSave;
+                operation.wallIndices = wallsToSave.map(w => walls.indexOf(w));
+            } else if (objectType === 'void') {
+                operation.voidIndices = addedItems.map(v => voids.indexOf(v));
+                operation.voids = addedItems;
+            }
             history.push(operation);
-            
-            // Clear redo history when new action is performed
             redoHistory = [];
-            
-            // Limit history size
             if (history.length > MAX_HISTORY) {
                 history.shift();
             }
+        }
+
+        // Add a void deletion operation to history
+        function addVoidDeletionToHistory(deletedVoid) {
+            const operation = {
+                objectType: 'void-delete',
+                voidData: {
+                    id: deletedVoid.id,
+                    floorId: deletedVoid.floorId,
+                    x: deletedVoid.x,
+                    y: deletedVoid.y,
+                    width: deletedVoid.width,
+                    height: deletedVoid.height
+                },
+                timestamp: Date.now()
+            };
+            history.push(operation);
+            redoHistory = [];
+            if (history.length > MAX_HISTORY) history.shift();
         }
 
         // Canvas variables
