@@ -556,6 +556,12 @@
                     Flip Wall (Space)
                 </button>
             </div>
+            <div class="property-group" style="margin-top: 16px;">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="slabRestrictionsEnabled">
+                    Slab-based restrictions
+                </label>
+            </div>
         </div>
 
         <div class="tools-section">
@@ -648,7 +654,8 @@
         const GRID_SIZE_INTERNAL = 100; // mm - 100mm internal
         const MM_TO_PX = 0.15; // Scale factor for visualization (1mm = 0.15px)
         const COLUMN_SIZE = 100; // mm - 10x10cm steel column
-        const MIN_WALL_LENGTH = 400; // mm
+        const MIN_WALL_LENGTH = 600; // mm - smallest valid 600mm multiple
+        const WALL_LENGTH_GRID = 600; // mm - wall lengths must be multiples of this
         const MIN_DISTANCE_PARALLEL = 600; // mm
         const MIN_DISTANCE_OPPOSITE = 1200; // mm
 
@@ -686,6 +693,13 @@
         let stretchingWall = null;
         let stretchingEndpoint = null; // 'A' or 'B'
         let originalStretchPoint = null;
+        
+        // Building envelopes (waffle slabs)
+        let buildingEnvelopes = []; // Array of { floorId, polygon: [{x, y}], timestamp }
+        let newEnvelopeTimestamp = null; // Track when a new envelope appears for animation
+        
+        // Slab-based restrictions toggle
+        let slabRestrictionsEnabled = false;
 
         // Toast notification system
         function showToast(message, type = 'error', duration = 4000) {
@@ -807,6 +821,7 @@
             }
             
             selectedWalls = [];
+            updateBuildingEnvelopes(); // Update slabs after undo
             updateUI();
             draw();
             
@@ -832,6 +847,7 @@
             addToHistory(operation.walls);
             
             selectedWalls = [];
+            updateBuildingEnvelopes(); // Update slabs after redo
             updateUI();
             draw();
             
@@ -1318,7 +1334,615 @@
             });
         }
 
+        // Detect building envelopes (closed loops of wall internal faces) on a given floor
+        function detectBuildingEnvelopes(floorId) {
+            const floorWalls = walls.filter(w => w.floorId === floorId);
+            if (floorWalls.length < 3) return []; // Need at least 3 walls to form a loop
+            
+            const ENDPOINT_TOLERANCE = 2; // mm - walls must be within 2mm to be considered connected
+            
+            // Build a graph of connections between wall endpoints
+            // Each node is a point, edges connect to walls that share that point
+            const graph = new Map(); // Map<pointKey, Set<wallIndex>>
+            
+            const pointKey = (x, y) => `${Math.round(x)},${Math.round(y)}`;
+            
+            floorWalls.forEach((wall, idx) => {
+                const keyA = pointKey(wall.pointA.x, wall.pointA.y);
+                const keyB = pointKey(wall.pointB.x, wall.pointB.y);
+                
+                if (!graph.has(keyA)) graph.set(keyA, new Set());
+                if (!graph.has(keyB)) graph.set(keyB, new Set());
+                
+                graph.get(keyA).add(idx);
+                graph.get(keyB).add(idx);
+            });
+            
+            // Find all closed loops using DFS
+            const loops = [];
+            const visited = new Set();
+            
+            function findLoop(startWallIdx, currentWallIdx, path, visitedWalls, wallIndices) {
+                if (visitedWalls.has(currentWallIdx)) {
+                    // Check if we've completed a loop back to start
+                    if (currentWallIdx === startWallIdx && path.length >= 3) {
+                        return { path: path.slice(), indices: Array.from(wallIndices) };
+                    }
+                    return null;
+                }
+                
+                visitedWalls.add(currentWallIdx);
+                wallIndices.add(currentWallIdx);
+                const currentWall = floorWalls[currentWallIdx];
+                
+                // Determine which endpoint to continue from
+                const lastPoint = path.length > 0 ? path[path.length - 1] : null;
+                let nextPoint;
+                
+                if (!lastPoint) {
+                    // First wall - start from pointA, go to pointB
+                    path.push({ x: currentWall.pointA.x, y: currentWall.pointA.y });
+                    nextPoint = currentWall.pointB;
+                } else {
+                    // Determine which end connects to the last point
+                    const distToA = Math.sqrt(
+                        Math.pow(lastPoint.x - currentWall.pointA.x, 2) +
+                        Math.pow(lastPoint.y - currentWall.pointA.y, 2)
+                    );
+                    const distToB = Math.sqrt(
+                        Math.pow(lastPoint.x - currentWall.pointB.x, 2) +
+                        Math.pow(lastPoint.y - currentWall.pointB.y, 2)
+                    );
+                    
+                    if (distToA < ENDPOINT_TOLERANCE) {
+                        nextPoint = currentWall.pointB;
+                    } else if (distToB < ENDPOINT_TOLERANCE) {
+                        nextPoint = currentWall.pointA;
+                    } else {
+                        // Not connected
+                        visitedWalls.delete(currentWallIdx);
+                        return null;
+                    }
+                }
+                
+                path.push({ x: nextPoint.x, y: nextPoint.y });
+                
+                // Find walls connected to nextPoint
+                const nextKey = pointKey(nextPoint.x, nextPoint.y);
+                const connectedWalls = graph.get(nextKey);
+                
+                if (!connectedWalls) {
+                    visitedWalls.delete(currentWallIdx);
+                    return null;
+                }
+                
+                // Try each connected wall
+                for (let wallIdx of connectedWalls) {
+                    if (wallIdx === currentWallIdx) continue; // Skip current wall
+                    
+                    // Check if this completes the loop
+                    if (wallIdx === startWallIdx && path.length >= 4) {
+                        // Completed loop! Remove the duplicate last point
+                        return { path: path.slice(0, -1), indices: Array.from(wallIndices) };
+                    }
+                    
+                    if (!visitedWalls.has(wallIdx)) {
+                        const result = findLoop(startWallIdx, wallIdx, path, new Set(visitedWalls), new Set(wallIndices));
+                        if (result) {
+                            return result;
+                        }
+                    }
+                }
+                
+                // Backtrack
+                path.pop();
+                path.pop();
+                visitedWalls.delete(currentWallIdx);
+                return null;
+            }
+            
+            // Try starting from each wall
+            for (let i = 0; i < floorWalls.length; i++) {
+                if (visited.has(i)) continue;
+                
+                const result = findLoop(i, i, [], new Set(), new Set());
+                if (result && result.path && result.path.length >= 3) {
+                    loops.push(result.path);
+                    // Mark ALL walls in this loop as visited to prevent duplicates
+                    result.indices.forEach(idx => visited.add(idx));
+                }
+            }
+            
+            return loops;
+        }
+        
+        // Update building envelopes for all floors
+        function updateBuildingEnvelopes() {
+            const previousCount = buildingEnvelopes.length;
+            buildingEnvelopes = [];
+            
+            // Detect envelopes on each floor
+            floors.forEach(floor => {
+                const loops = detectBuildingEnvelopes(floor.id);
+                loops.forEach(polygon => {
+                    buildingEnvelopes.push({
+                        floorId: floor.id,
+                        polygon: polygon,
+                        timestamp: Date.now()
+                    });
+                });
+            });
+            
+            const newCount = buildingEnvelopes.length;
+            
+            // Show toast notifications for changes
+            if (newCount > previousCount) {
+                const added = newCount - previousCount;
+                showToast(`Waffle Slab${added > 1 ? 's' : ''} added`, 'info', 2000);
+                newEnvelopeTimestamp = Date.now();
+            } else if (newCount < previousCount) {
+                const removed = previousCount - newCount;
+                showToast(`Waffle Slab${removed > 1 ? 's' : ''} removed`, 'info', 2000);
+            }
+        }
+        
+        // Check if a point is on or very close to a line segment
+        function pointNearLineSegment(point, lineStart, lineEnd, tolerance = 5) {
+            const dx = lineEnd.x - lineStart.x;
+            const dy = lineEnd.y - lineStart.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            
+            if (length === 0) return Math.sqrt(
+                Math.pow(point.x - lineStart.x, 2) + 
+                Math.pow(point.y - lineStart.y, 2)
+            ) < tolerance;
+            
+            const t = Math.max(0, Math.min(1, 
+                ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (length * length)
+            ));
+            
+            const projX = lineStart.x + t * dx;
+            const projY = lineStart.y + t * dy;
+            
+            const dist = Math.sqrt(
+                Math.pow(point.x - projX, 2) + 
+                Math.pow(point.y - projY, 2)
+            );
+            
+            return dist < tolerance;
+        }
+        
+        // Check if a point is inside a polygon (ray casting algorithm)
+        function pointInPolygon(point, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i].x, yi = polygon[i].y;
+                const xj = polygon[j].x, yj = polygon[j].y;
+                
+                const intersect = ((yi > point.y) !== (yj > point.y)) &&
+                    (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+        
+        // Get which envelope(s) a wall belongs to on its floor
+        function getWallSlabSystem(wall) {
+            const envelopeIndices = [];
+            
+            buildingEnvelopes.forEach((envelope, idx) => {
+                // Only check envelopes on the same floor
+                if (envelope.floorId !== wall.floorId) return;
+                
+                // Check if both wall endpoints are part of this envelope's polygon edges
+                const pointAInEnvelope = envelope.polygon.some((p, i) => {
+                    const nextP = envelope.polygon[(i + 1) % envelope.polygon.length];
+                    return pointNearLineSegment(wall.pointA, p, nextP, 5);
+                });
+                
+                const pointBInEnvelope = envelope.polygon.some((p, i) => {
+                    const nextP = envelope.polygon[(i + 1) % envelope.polygon.length];
+                    return pointNearLineSegment(wall.pointB, p, nextP, 5);
+                });
+                
+                // If endpoints are on the polygon boundary, wall is part of envelope
+                if (pointAInEnvelope && pointBInEnvelope) {
+                    envelopeIndices.push(idx);
+                } 
+                // Also check if wall is inside the envelope (for preview walls during drawing)
+                else if (pointInPolygon(wall.pointA, envelope.polygon) || 
+                         pointInPolygon(wall.pointB, envelope.polygon)) {
+                    envelopeIndices.push(idx);
+                }
+            });
+            
+            return envelopeIndices;
+        }
+        
+        // Check if two polygons overlap (for cross-floor envelope connection)
+        function envelopesOverlap(envelope1, envelope2) {
+            // Quick bounding box check
+            const bbox1 = {
+                minX: Math.min(...envelope1.polygon.map(p => p.x)),
+                maxX: Math.max(...envelope1.polygon.map(p => p.x)),
+                minY: Math.min(...envelope1.polygon.map(p => p.y)),
+                maxY: Math.max(...envelope1.polygon.map(p => p.y))
+            };
+            
+            const bbox2 = {
+                minX: Math.min(...envelope2.polygon.map(p => p.x)),
+                maxX: Math.max(...envelope2.polygon.map(p => p.x)),
+                minY: Math.min(...envelope2.polygon.map(p => p.y)),
+                maxY: Math.max(...envelope2.polygon.map(p => p.y))
+            };
+            
+            // If bounding boxes don't overlap, polygons don't overlap
+            if (bbox1.maxX < bbox2.minX || bbox2.maxX < bbox1.minX ||
+                bbox1.maxY < bbox2.minY || bbox2.maxY < bbox1.minY) {
+                return false;
+            }
+            
+            // Check if any point of envelope1 is in envelope2
+            for (let point of envelope1.polygon) {
+                if (pointInPolygon(point, envelope2.polygon)) return true;
+            }
+            
+            // Check if any point of envelope2 is in envelope1
+            for (let point of envelope2.polygon) {
+                if (pointInPolygon(point, envelope1.polygon)) return true;
+            }
+            
+            // Check for edge intersections
+            function lineSegmentsIntersect(p1, p2, p3, p4) {
+                const ccw = (A, B, C) => (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+                return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
+            }
+            
+            for (let i = 0; i < envelope1.polygon.length; i++) {
+                const p1 = envelope1.polygon[i];
+                const p2 = envelope1.polygon[(i + 1) % envelope1.polygon.length];
+                
+                for (let j = 0; j < envelope2.polygon.length; j++) {
+                    const p3 = envelope2.polygon[j];
+                    const p4 = envelope2.polygon[(j + 1) % envelope2.polygon.length];
+                    
+                    if (lineSegmentsIntersect(p1, p2, p3, p4)) return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        // Build connected slab systems using union-find across floors
+        function getConnectedSlabSystems() {
+            if (buildingEnvelopes.length === 0) return new Map();
+            
+            // Union-Find data structure
+            const parent = new Map();
+            const rank = new Map();
+            
+            // Initialize each envelope as its own parent
+            buildingEnvelopes.forEach((_, idx) => {
+                parent.set(idx, idx);
+                rank.set(idx, 0);
+            });
+            
+            function find(x) {
+                if (parent.get(x) !== x) {
+                    parent.set(x, find(parent.get(x))); // Path compression
+                }
+                return parent.get(x);
+            }
+            
+            function union(x, y) {
+                const rootX = find(x);
+                const rootY = find(y);
+                
+                if (rootX === rootY) return;
+                
+                // Union by rank
+                if (rank.get(rootX) < rank.get(rootY)) {
+                    parent.set(rootX, rootY);
+                } else if (rank.get(rootX) > rank.get(rootY)) {
+                    parent.set(rootY, rootX);
+                } else {
+                    parent.set(rootY, rootX);
+                    rank.set(rootX, rank.get(rootX) + 1);
+                }
+            }
+            
+            // Connect envelopes on consecutive floors that overlap
+            for (let i = 0; i < buildingEnvelopes.length; i++) {
+                for (let j = i + 1; j < buildingEnvelopes.length; j++) {
+                    const env1 = buildingEnvelopes[i];
+                    const env2 = buildingEnvelopes[j];
+                    
+                    // Check if on consecutive floors
+                    const floorDiff = Math.abs(env1.floorId - env2.floorId);
+                    if (floorDiff === 1) {
+                        // Check if they overlap
+                        if (envelopesOverlap(env1, env2)) {
+                            union(i, j);
+                        }
+                    }
+                }
+            }
+            
+            // Build map of envelope index to system ID
+            const systemMap = new Map();
+            buildingEnvelopes.forEach((_, idx) => {
+                systemMap.set(idx, find(idx));
+            });
+            
+            return systemMap;
+        }
+        
+        // Check if two walls are in the same slab system (with connection details)
+        function areWallsInSameSlabSystem(wall1, wall2, returnDetails = false) {
+            // Get envelope indices for both walls
+            const env1Indices = getWallSlabSystem(wall1);
+            const env2Indices = getWallSlabSystem(wall2);
+            
+            // If both walls are orphans (not in any envelope), they're in the same "orphan system"
+            if (env1Indices.length === 0 && env2Indices.length === 0) {
+                if (returnDetails) {
+                    return { inSameSystem: true, reason: "Both walls not part of any envelope" };
+                }
+                return true; // Both orphans
+            }
+            
+            // If one is orphan and other is not, they're in different systems
+            if (env1Indices.length === 0 || env2Indices.length === 0) {
+                if (returnDetails) {
+                    return { inSameSystem: false, reason: "One wall in envelope, other is not" };
+                }
+                return false;
+            }
+            
+            // Get connected slab systems
+            const systemMap = getConnectedSlabSystems();
+            
+            // Check if any envelope from wall1 shares a system with any envelope from wall2
+            for (let env1Idx of env1Indices) {
+                const system1 = systemMap.get(env1Idx);
+                for (let env2Idx of env2Indices) {
+                    const system2 = systemMap.get(env2Idx);
+                    if (system1 === system2) {
+                        if (returnDetails) {
+                            // Find the connection path
+                            const env1 = buildingEnvelopes[env1Idx];
+                            const env2 = buildingEnvelopes[env2Idx];
+                            
+                            if (env1.floorId === env2.floorId) {
+                                return { 
+                                    inSameSystem: true, 
+                                    reason: `Walls in same envelope on ${floors.find(f => f.id === env1.floorId)?.name || 'Level ' + (env1.floorId + 1)}`
+                                };
+                            } else {
+                                // Find which floors are connecting them
+                                const floorIds = new Set([env1.floorId, env2.floorId]);
+                                const minFloor = Math.min(env1.floorId, env2.floorId);
+                                const maxFloor = Math.max(env1.floorId, env2.floorId);
+                                
+                                if (maxFloor - minFloor === 1) {
+                                    return { 
+                                        inSameSystem: true, 
+                                        reason: `Walls connected via overlapping envelope across ${floors.find(f => f.id === minFloor)?.name || 'Level ' + (minFloor + 1)} and ${floors.find(f => f.id === maxFloor)?.name || 'Level ' + (maxFloor + 1)}`
+                                    };
+                                } else {
+                                    return { 
+                                        inSameSystem: true, 
+                                        reason: `Walls connected via envelope chain across multiple floors`
+                                    };
+                                }
+                            }
+                        }
+                        return true; // Same slab system
+                    }
+                }
+            }
+            
+            if (returnDetails) {
+                return { inSameSystem: false, reason: "Walls in different envelope systems" };
+            }
+            return false; // Different slab systems
+        }
+
+        // Predictively determine which slab system a preview wall would belong to
+        function getPredictedSlabSystemForPreviewWall(previewWall, useEndpoint = false) {
+            if (!slabRestrictionsEnabled) return null;
+            
+            // FIRST: Check if preview wall is beneath/overlapping an envelope on an ADJACENT floor
+            // If so, assume it will form part of an envelope in the same slab system
+            const adjacentFloorEnvelopes = buildingEnvelopes.filter(env => 
+                Math.abs(env.floorId - previewWall.floorId) === 1
+            );
+            
+            // Use endpoint (cursor position) if specified, otherwise use midpoint
+            const checkX = useEndpoint ? previewWall.pointB.x : (previewWall.pointA.x + previewWall.pointB.x) / 2;
+            const checkY = useEndpoint ? previewWall.pointB.y : (previewWall.pointA.y + previewWall.pointB.y) / 2;
+            
+            for (let envelope of adjacentFloorEnvelopes) {
+                // Check if the check point is inside this adjacent floor envelope
+                if (pointInPolygon({ x: checkX, y: checkY }, envelope.polygon)) {
+                    console.log('[Predictive] Preview wall is beneath/above an envelope on adjacent floor', envelope.floorId);
+                    
+                    // Get the slab system for this adjacent envelope
+                    const systemMap = getConnectedSlabSystems();
+                    const envelopeIdx = buildingEnvelopes.indexOf(envelope);
+                    
+                    if (envelopeIdx >= 0 && systemMap.has(envelopeIdx)) {
+                        const systemId = systemMap.get(envelopeIdx);
+                        
+                        // Build a Set of all envelope indices in the same system
+                        const envelopesInSystem = new Set();
+                        systemMap.forEach((sysId, envIdx) => {
+                            if (sysId === systemId) {
+                                envelopesInSystem.add(envIdx);
+                            }
+                        });
+                        
+                        console.log('[Predictive] Preview wall would be part of slab system with', envelopesInSystem.size, 'envelopes (cross-floor prediction)');
+                        return {
+                            systemEnvelopes: envelopesInSystem,
+                            allEnvelopes: buildingEnvelopes
+                        };
+                    }
+                }
+            }
+            
+            // SECOND: Check if preview wall would be part of EXISTING envelopes on its floor
+            // by checking proximity/containment
+            const existingEnvelopesOnFloor = buildingEnvelopes.filter(env => env.floorId === previewWall.floorId);
+            
+            for (let envelope of existingEnvelopesOnFloor) {
+                // Check if the check point is inside the envelope polygon
+                if (pointInPolygon({ x: checkX, y: checkY }, envelope.polygon)) {
+                    console.log('[Predictive] Preview wall is inside an existing envelope');
+                    
+                    // Get the slab system for this existing envelope
+                    const systemMap = getConnectedSlabSystems();
+                    const envelopeIdx = buildingEnvelopes.indexOf(envelope);
+                    
+                    if (envelopeIdx >= 0 && systemMap.has(envelopeIdx)) {
+                        const systemId = systemMap.get(envelopeIdx);
+                        
+                        // Build a Set of all envelope indices in the same system
+                        const envelopesInSystem = new Set();
+                        systemMap.forEach((sysId, envIdx) => {
+                            if (sysId === systemId) {
+                                envelopesInSystem.add(envIdx);
+                            }
+                        });
+                        
+                        console.log('[Predictive] Preview wall would be part of slab system with', envelopesInSystem.size, 'envelopes');
+                        return {
+                            systemEnvelopes: envelopesInSystem,
+                            allEnvelopes: buildingEnvelopes
+                        };
+                    }
+                }
+                
+                // Also check if preview wall is very close to envelope boundary (within 100mm)
+                for (let i = 0; i < envelope.polygon.length; i++) {
+                    const p1 = envelope.polygon[i];
+                    const p2 = envelope.polygon[(i + 1) % envelope.polygon.length];
+                    
+                    if (pointNearLineSegment({ x: checkX, y: checkY }, p1, p2, 100)) {
+                        console.log('[Predictive] Preview wall is near an existing envelope boundary');
+                        
+                        // Get the slab system for this existing envelope
+                        const systemMap = getConnectedSlabSystems();
+                        const envelopeIdx = buildingEnvelopes.indexOf(envelope);
+                        
+                        if (envelopeIdx >= 0 && systemMap.has(envelopeIdx)) {
+                            const systemId = systemMap.get(envelopeIdx);
+                            
+                            // Build a Set of all envelope indices in the same system
+                            const envelopesInSystem = new Set();
+                            systemMap.forEach((sysId, envIdx) => {
+                                if (sysId === systemId) {
+                                    envelopesInSystem.add(envIdx);
+                                }
+                            });
+                            
+                            console.log('[Predictive] Preview wall would be part of slab system with', envelopesInSystem.size, 'envelopes');
+                            return {
+                                systemEnvelopes: envelopesInSystem,
+                                allEnvelopes: buildingEnvelopes
+                            };
+                        }
+                    }
+                }
+            }
+            
+            // If not part of existing envelope, check if it would close a NEW envelope
+            const originalWalls = [...walls];
+            walls.push(previewWall);
+            
+            try {
+                // Detect envelopes on the preview wall's floor (with preview wall included)
+                const newEnvelopesOnFloor = detectBuildingEnvelopes(previewWall.floorId);
+                console.log('[Predictive] Detected', newEnvelopesOnFloor.length, 'envelopes on floor', previewWall.floorId);
+                
+                // Check if preview wall is part of any detected envelope
+                let previewWallEnvelope = null;
+                const previewWallIdx = walls.length - 1;
+                
+                newEnvelopesOnFloor.forEach((envelope) => {
+                    // Check if preview wall is on the boundary of this envelope
+                    const onBoundary = envelope.wallIndices && envelope.wallIndices.includes(previewWallIdx);
+                    
+                    if (onBoundary) {
+                        previewWallEnvelope = envelope;
+                        console.log('[Predictive] Preview wall would close a NEW envelope');
+                    }
+                });
+                
+                // If preview wall closes a new envelope, determine its slab system
+                if (previewWallEnvelope) {
+                    // Build a complete set of envelopes for slab system calculation:
+                    // 1. All existing envelopes NOT on preview floor
+                    // 2. All newly detected envelopes on preview floor (includes preview wall effect)
+                    const allEnvelopes = buildingEnvelopes.filter(env => env.floorId !== previewWall.floorId);
+                    
+                    // Add all detected envelopes on preview floor with proper floorId
+                    newEnvelopesOnFloor.forEach(env => {
+                        env.floorId = previewWall.floorId;
+                        allEnvelopes.push(env);
+                    });
+                    
+                    // Get connected slab systems with this combined envelope set
+                    const tempEnvelopes = buildingEnvelopes;
+                    buildingEnvelopes = allEnvelopes;
+                    const systemMap = getConnectedSlabSystems();
+                    buildingEnvelopes = tempEnvelopes;
+                    
+                    // Find the envelope index for the preview wall's envelope in allEnvelopes
+                    const previewEnvIdx = allEnvelopes.findIndex(env => 
+                        env === previewWallEnvelope || 
+                        (env.floorId === previewWall.floorId && 
+                         env.wallIndices && 
+                         env.wallIndices.includes(previewWallIdx))
+                    );
+                    
+                    if (previewEnvIdx >= 0 && systemMap.has(previewEnvIdx)) {
+                        // Get the system ID (root) for this envelope
+                        const systemId = systemMap.get(previewEnvIdx);
+                        
+                        // Build a Set of all envelope indices in the same system
+                        const envelopesInSystem = new Set();
+                        systemMap.forEach((sysId, envIdx) => {
+                            if (sysId === systemId) {
+                                envelopesInSystem.add(envIdx);
+                            }
+                        });
+                        
+                        console.log('[Predictive] Preview wall would join slab system with', envelopesInSystem.size, 'envelopes');
+                        return {
+                            systemEnvelopes: envelopesInSystem,
+                            allEnvelopes: allEnvelopes
+                        };
+                    }
+                }
+                
+                console.log('[Predictive] Preview wall is orphan (not part of any envelope)');
+                return null; // Preview wall is orphan
+                
+            } finally {
+                // Restore original walls array
+                walls = originalWalls;
+            }
+        }
+
         function isWallInRestrictedZone(newWall) {
+            // Predictive slab system detection for preview walls
+            // Use endpoint (cursor position) for more accurate prediction
+            let predictedSlabSystem = null;
+            if (slabRestrictionsEnabled) {
+                predictedSlabSystem = getPredictedSlabSystemForPreviewWall(newWall, true);
+            }
+            
             for (let existingWall of walls) {
                 const onSameFloor = newWall.floorId === existingWall.floorId;
                 const onDifferentFloor = newWall.floorId !== existingWall.floorId;
@@ -1326,6 +1950,32 @@
                 // Check if walls are perpendicular - no restriction
                 if (existingWall.isPerpendicularTo(newWall)) {
                     continue;
+                }
+                
+                // Slab-based restrictions: only affects orphan vs envelope interactions
+                // Normal distance rules still apply to:
+                // - Same slab system walls
+                // - Different slab system walls  
+                // - Orphan vs orphan walls
+                if (slabRestrictionsEnabled) {
+                    const existingWallSlabs = getWallSlabSystem(existingWall);
+                    const previewIsInEnvelope = predictedSlabSystem !== null;
+                    
+                    // Also check if existing wall is beneath an envelope on adjacent floor
+                    const existingPredictedSystem = getPredictedSlabSystemForPreviewWall(existingWall);
+                    const existingIsInEnvelope = existingWallSlabs.length > 0 || existingPredictedSystem !== null;
+                    
+                    // ONLY skip if one is orphan and the other is in an envelope
+                    if (previewIsInEnvelope && !existingIsInEnvelope) {
+                        // Preview in envelope, existing is orphan - skip
+                        continue;
+                    } else if (!previewIsInEnvelope && existingIsInEnvelope) {
+                        // Preview is orphan, existing in envelope - skip
+                        continue;
+                    }
+                    // All other cases: continue with normal validation
+                    // - Both in envelopes (same or different systems): validate normally
+                    // - Both orphans: validate normally
                 }
 
                 // Check if parallel
@@ -1568,6 +2218,108 @@
             return null;
         }
         
+        // Draw building envelopes (waffle slabs) with cross-floor visibility
+        function drawBuildingEnvelopes() {
+            const showLevelsBelow = document.getElementById('showOtherFloors').checked;
+            const showLevelsAbove = document.getElementById('showLevelsAbove')?.checked;
+            
+            buildingEnvelopes.forEach(envelope => {
+                const onCurrentFloor = envelope.floorId === currentFloorId;
+                const onFloorBelow = envelope.floorId < currentFloorId;
+                const onFloorAbove = envelope.floorId > currentFloorId;
+                
+                // Skip if not on current floor and respective checkbox is unchecked
+                if (onFloorBelow && !showLevelsBelow) return;
+                if (onFloorAbove && !showLevelsAbove) return;
+                
+                // Calculate opacity and animation
+                let baseOpacity = 0.05; // Very faint blue for current floor
+                let bounceScale = 1.0;
+                
+                if (onFloorBelow) {
+                    const floorsBelow = currentFloorId - envelope.floorId;
+                    baseOpacity = Math.max(0.02, 0.04 - (floorsBelow * 0.01));
+                } else if (onFloorAbove) {
+                    const floorsAbove = envelope.floorId - currentFloorId;
+                    baseOpacity = Math.max(0.02, 0.04 - (floorsAbove * 0.01));
+                }
+                
+                // Bounce animation for new envelopes (only on current floor)
+                if (onCurrentFloor && newEnvelopeTimestamp) {
+                    const timeSinceAppear = Date.now() - newEnvelopeTimestamp;
+                    const animationDuration = 500; // ms
+                    
+                    if (timeSinceAppear < animationDuration) {
+                        const progress = timeSinceAppear / animationDuration;
+                        // Gentle bounce effect - reduced intensity
+                        bounceScale = 1 + Math.sin(progress * Math.PI) * 0.04 * (1 - progress);
+                    } else {
+                        newEnvelopeTimestamp = null; // Animation complete
+                    }
+                }
+                
+                ctx.save();
+                
+                // For above floors, draw dashed outline
+                if (onFloorAbove) {
+                    ctx.globalAlpha = baseOpacity * 4; // Higher opacity for outline
+                    ctx.strokeStyle = '#2196F3';
+                    ctx.lineWidth = 1 / zoomLevel;
+                    ctx.setLineDash([6 / zoomLevel, 6 / zoomLevel]);
+                    
+                    ctx.beginPath();
+                    envelope.polygon.forEach((point, i) => {
+                        if (i === 0) {
+                            ctx.moveTo(mmToPx(point.x), mmToPx(point.y));
+                        } else {
+                            ctx.lineTo(mmToPx(point.x), mmToPx(point.y));
+                        }
+                    });
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+                
+                // Draw filled polygon
+                ctx.globalAlpha = baseOpacity;
+                ctx.fillStyle = '#2196F3'; // Blue color
+                
+                // Apply bounce scale (only for current floor)
+                if (onCurrentFloor && bounceScale !== 1.0) {
+                    // Calculate center of polygon
+                    let centerX = 0, centerY = 0;
+                    envelope.polygon.forEach(p => {
+                        centerX += p.x;
+                        centerY += p.y;
+                    });
+                    centerX /= envelope.polygon.length;
+                    centerY /= envelope.polygon.length;
+                    
+                    ctx.translate(mmToPx(centerX), mmToPx(centerY));
+                    ctx.scale(bounceScale, bounceScale);
+                    ctx.translate(-mmToPx(centerX), -mmToPx(centerY));
+                }
+                
+                ctx.beginPath();
+                envelope.polygon.forEach((point, i) => {
+                    if (i === 0) {
+                        ctx.moveTo(mmToPx(point.x), mmToPx(point.y));
+                    } else {
+                        ctx.lineTo(mmToPx(point.x), mmToPx(point.y));
+                    }
+                });
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.restore();
+            });
+            
+            // Request animation frame if bounce animation is active
+            if (newEnvelopeTimestamp && (Date.now() - newEnvelopeTimestamp < 500)) {
+                requestAnimationFrame(draw);
+            }
+        }
+        
         function draw() {
             if (!ctx || !canvas) {
                 console.error('Canvas not initialized in draw!');
@@ -1583,6 +2335,19 @@
             ctx.setTransform(zoomLevel, 0, 0, zoomLevel, panOffset.x, panOffset.y);
             
             drawGrid();
+            
+            // Draw building envelopes (waffle slabs) - BEFORE walls so walls appear on top
+            drawBuildingEnvelopes();
+
+            // Get violations for walls (needed for rendering below/above level walls)
+            const wallViolations = new Map();
+            walls.forEach((wall, idx) => {
+                if (wall.floorId === currentFloorId || 
+                    wall.floorId === currentFloorId - 1 || 
+                    wall.floorId === currentFloorId + 1) {
+                    wallViolations.set(idx, validateWall(wall, idx));
+                }
+            });
 
             // Draw walls from levels below if enabled
             if (document.getElementById('showOtherFloors').checked) {
@@ -1594,8 +2359,11 @@
                         const floorsBelow = currentFloorId - wall.floorId;
                         const opacity = Math.max(0.1, 0.5 - (floorsBelow * 0.15));
                         
-                        // Lighter gray color for trace
-                        drawWall(wall, false, [], opacity, '#90A4AE');
+                        // Get violations for this wall to show red color if needed
+                        const violations = wallViolations.get(idx) || [];
+                        
+                        // Lighter gray color for trace (unless has violations)
+                        drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#90A4AE');
                     }
                 });
             }
@@ -1609,14 +2377,18 @@
                         // Calculate opacity based on distance from current level
                         const floorsAbove = wall.floorId - currentFloorId;
                         
+                        // Check for violations
+                        const violations = wallViolations.get(idx) || [];
+                        const hasViolation = violations.some(v => v.type === 'error');
+                        
                         // Get wall faces
                         const external = wall.getExternalFacePoints();
                         
-                        // Draw filled rectangle with very faint light grey
+                        // Draw filled rectangle with very faint light grey (or red if violations)
                         // Use much lower opacity for fill (0.15 for 1 level above)
                         const fillOpacity = Math.max(0.08, 0.15 - (floorsAbove * 0.04));
                         ctx.globalAlpha = fillOpacity;
-                        ctx.fillStyle = '#B0BEC5'; // Light blue-grey fill
+                        ctx.fillStyle = hasViolation ? '#f44336' : '#B0BEC5'; // Red if violations, light blue-grey otherwise
                         
                         ctx.beginPath();
                         ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
@@ -1629,7 +2401,7 @@
                         // Draw dashed outline with higher opacity for visibility
                         const outlineOpacity = Math.max(0.2, 0.4 - (floorsAbove * 0.1));
                         ctx.globalAlpha = outlineOpacity;
-                        ctx.strokeStyle = '#607D8B'; // Darker blue-grey outline
+                        ctx.strokeStyle = hasViolation ? '#f44336' : '#607D8B'; // Red if violations, darker blue-grey otherwise
                         ctx.lineWidth = 2 / zoomLevel;
                         ctx.setLineDash([8 / zoomLevel, 8 / zoomLevel]);
                         ctx.stroke();
@@ -1645,16 +2417,6 @@
             
             // Get current level walls
             const currentFloorWalls = walls.filter(w => w.floorId === currentFloorId);
-
-            // Get violations for current level walls
-            const wallViolations = new Map();
-            walls.forEach((wall, idx) => {
-                if (wall.floorId === currentFloorId || 
-                    wall.floorId === currentFloorId - 1 || 
-                    wall.floorId === currentFloorId + 1) {
-                    wallViolations.set(idx, validateWall(wall, idx));
-                }
-            });
 
             // Draw current level walls
             walls.forEach((wall, idx) => {
@@ -1742,6 +2504,31 @@
                         // Only draw zones for parallel walls
                         const isParallel = existingWall.isParallelTo(tempWall);
                         if (!isParallel) return;
+                        
+                        // Check slab system membership for zone drawing decisions
+                        let previewIsInEnvelope = false;
+                        let existingIsInEnvelope = false;
+                        
+                        // Slab-based restrictions: only affects orphan vs envelope interactions
+                        if (slabRestrictionsEnabled) {
+                            const predictedSystem = getPredictedSlabSystemForPreviewWall(tempWall, true); // Check cursor position
+                            const existingWallSlabs = getWallSlabSystem(existingWall);
+                            previewIsInEnvelope = predictedSystem !== null;
+                            
+                            // Also check if existing wall is beneath an envelope on adjacent floor
+                            const existingPredictedSystem = getPredictedSlabSystemForPreviewWall(existingWall);
+                            existingIsInEnvelope = existingWallSlabs.length > 0 || existingPredictedSystem !== null;
+                            
+                            // ONLY skip if one is orphan and the other is in an envelope
+                            if (previewIsInEnvelope && !existingIsInEnvelope) {
+                                // Preview in envelope, existing is orphan - skip
+                                return;
+                            } else if (!previewIsInEnvelope && existingIsInEnvelope) {
+                                // Preview is orphan, existing in envelope - skip
+                                return;
+                            }
+                            // All other cases: show zones normally
+                        }
                         
                         // Calculate preview midpoint (used for both special case and general case)
                         const previewMidX = (tempWall.pointA.x + tempWall.pointB.x) / 2;
@@ -1885,10 +2672,10 @@
                             requiredDistance = MIN_DISTANCE_PARALLEL;
                         }
                         
-                        // Only show zone if preview wall would violate the distance rule
-                        // Add 2mm tolerance to match validation logic
+                        // Show zone only if close enough to violate distance rules
+                        // (Slab system membership only affects orphan skipping, which is handled above)
                         if (actualDistance >= requiredDistance - 2) {
-                            return; // Skip this wall - no violation risk
+                            return; // Skip - not close enough to show zone
                         }
                         
                         // Mark this wall as generating a restriction zone
@@ -2075,8 +2862,65 @@
                 ctx.stroke();
             }
             
-            // Draw pulsing red overlay on walls generating restriction zones
-            if (drawingWall && restrictingWalls.size > 0) {
+            // Show snap indicator when hovering and ready to start drawing
+            if (currentMousePos && currentMode === 'draw' && !drawingWall) {
+                drawSnapIndicator(currentMousePos.x, currentMousePos.y);
+            }
+            
+            // Detect hover for tooltips and pulsing (but don't render yet)
+            let hoveredWallWithErrors = null;
+            let tooltipData = null;
+            
+            if (currentMousePos && currentMode !== 'draw') {
+                let hoveredWall = null;
+                let hoveredWallIndex = null;
+                
+                // Find wall under mouse
+                walls.forEach((wall, idx) => {
+                    if (Math.abs(wall.floorId - currentFloorId) > 1) return;
+                    
+                    const external = wall.getExternalFacePoints();
+                    ctx.beginPath();
+                    ctx.moveTo(mmToPx(wall.pointA.x), mmToPx(wall.pointA.y));
+                    ctx.lineTo(mmToPx(wall.pointB.x), mmToPx(wall.pointB.y));
+                    ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
+                    ctx.lineTo(mmToPx(external.a.x), mmToPx(external.a.y));
+                    ctx.closePath();
+                    
+                    if (ctx.isPointInPath(mmToPx(currentMousePos.x), mmToPx(currentMousePos.y))) {
+                        hoveredWall = wall;
+                        hoveredWallIndex = idx;
+                    }
+                });
+                
+                // Check for violations and prepare tooltip data
+                if (hoveredWall && hoveredWallIndex !== null && currentMouseScreenPos) {
+                    const violations = wallViolations.get(hoveredWallIndex) || validateWall(hoveredWall, hoveredWallIndex);
+                    const errors = violations.filter(v => v.type === 'error');
+                    
+                    if (errors.length > 0) {
+                        // Add conflicting walls to pulsing set
+                        errors.forEach(error => {
+                            if (error.conflictingWallIndex !== undefined) {
+                                restrictingWalls.add(error.conflictingWallIndex);
+                            }
+                        });
+                        
+                        // Prepare tooltip data for rendering later
+                        const tooltipLines = errors.map(e => e.message || String(e)).filter(msg => msg);
+                        if (tooltipLines.length > 0) {
+                            tooltipData = {
+                                lines: tooltipLines,
+                                mouseX: currentMouseScreenPos.x,
+                                mouseY: currentMouseScreenPos.y
+                            };
+                        }
+                    }
+                }
+            }
+            
+            // Draw pulsing red overlay on walls generating restriction zones (after hover detection)
+            if (restrictingWalls.size > 0) {
                 // Calculate pulse opacity using sine wave (0.3 to 0.6 range)
                 const time = Date.now() / 1000; // Convert to seconds
                 const pulseOpacity = 0.45 + Math.sin(time * 3) * 0.15; // 3 Hz frequency
@@ -2087,6 +2931,9 @@
                 restrictingWalls.forEach(wallIdx => {
                     const wall = walls[wallIdx];
                     if (!wall) return;
+                    
+                    // Only pulse walls on current floor or adjacent floors
+                    if (Math.abs(wall.floorId - currentFloorId) > 1) return;
                     
                     const external = wall.getExternalFacePoints();
                     
@@ -2106,9 +2953,81 @@
                 requestAnimationFrame(draw);
             }
             
-            // Show snap indicator when hovering and ready to start drawing
-            if (currentMousePos && currentMode === 'draw' && !drawingWall) {
-                drawSnapIndicator(currentMousePos.x, currentMousePos.y);
+            // Render tooltip at the very end (after all other drawing is complete)
+            if (tooltipData) {
+                // Save current state and completely reset to screen coordinates
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.globalAlpha = 1.0;
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+                ctx.setLineDash([]);
+                
+                const padding = 16;
+                const lineHeight = 20;
+                const fontSize = 14;
+                
+                // CRITICAL: Set font properties BEFORE measuring
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+                
+                // Calculate dimensions with proper measurement
+                const widths = tooltipData.lines.map(line => ctx.measureText(line).width);
+                const maxWidth = Math.max(...widths);
+                const tooltipWidth = Math.ceil(maxWidth) + padding * 2;
+                const tooltipHeight = tooltipData.lines.length * lineHeight + padding * 2 - 4;
+                
+                // Position (stay on screen)
+                let tooltipX = tooltipData.mouseX + 15;
+                let tooltipY = tooltipData.mouseY + 15;
+                
+                if (tooltipX + tooltipWidth > canvas.width) {
+                    tooltipX = tooltipData.mouseX - tooltipWidth - 15;
+                }
+                if (tooltipY + tooltipHeight > canvas.height) {
+                    tooltipY = tooltipData.mouseY - tooltipHeight - 15;
+                }
+                
+                // Draw background
+                ctx.fillStyle = 'rgba(244, 67, 54, 0.95)';
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 2;
+                
+                const radius = 6;
+                ctx.beginPath();
+                ctx.moveTo(tooltipX + radius, tooltipY);
+                ctx.lineTo(tooltipX + tooltipWidth - radius, tooltipY);
+                ctx.quadraticCurveTo(tooltipX + tooltipWidth, tooltipY, tooltipX + tooltipWidth, tooltipY + radius);
+                ctx.lineTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight - radius);
+                ctx.quadraticCurveTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight, tooltipX + tooltipWidth - radius, tooltipY + tooltipHeight);
+                ctx.lineTo(tooltipX + radius, tooltipY + tooltipHeight);
+                ctx.quadraticCurveTo(tooltipX, tooltipY + tooltipHeight, tooltipX, tooltipY + tooltipHeight - radius);
+                ctx.lineTo(tooltipX, tooltipY + radius);
+                ctx.quadraticCurveTo(tooltipX, tooltipY, tooltipX + radius, tooltipY);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Reset shadow
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+                
+                // Draw text (font already set from measurement)
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                tooltipData.lines.forEach((line, i) => {
+                    ctx.fillText(line, tooltipX + padding, tooltipY + padding + i * lineHeight);
+                });
+                
+                // Restore state
+                ctx.restore();
             }
         }
 
@@ -2124,12 +3043,49 @@
                 });
             }
 
+            // Check wall length is a multiple of 600mm
+            if (wall.length >= MIN_WALL_LENGTH && wall.length % WALL_LENGTH_GRID !== 0) {
+                violations.push({
+                    type: 'error',
+                    message: `Wall length (${Math.round(wall.length / 10)}cm) must be a multiple of ${WALL_LENGTH_GRID / 10}cm`
+                });
+            }
+
             // Check against other walls
             walls.forEach((otherWall, otherIndex) => {
                 if (wallIndex === otherIndex) return;
                 
                 // Skip validation between segments of the same wall (auto-split)
                 if (wall.groupId && wall.groupId === otherWall.groupId) return;
+                
+                // Slab-based restrictions: only affects orphan vs envelope interactions
+                let slabContext = "";
+                if (slabRestrictionsEnabled) {
+                    const wallSlabs = getWallSlabSystem(wall);
+                    const otherWallSlabs = getWallSlabSystem(otherWall);
+                    
+                    // Also check predictions for cross-floor envelopes
+                    const wallPredicted = getPredictedSlabSystemForPreviewWall(wall);
+                    const otherWallPredicted = getPredictedSlabSystemForPreviewWall(otherWall);
+                    
+                    const wallIsInEnvelope = wallSlabs.length > 0 || wallPredicted !== null;
+                    const otherIsInEnvelope = otherWallSlabs.length > 0 || otherWallPredicted !== null;
+                    
+                    // ONLY skip if one is orphan and the other is in an envelope
+                    if (wallIsInEnvelope && !otherIsInEnvelope) {
+                        return; // Wall in envelope, other is orphan - skip
+                    } else if (!wallIsInEnvelope && otherIsInEnvelope) {
+                        return; // Wall is orphan, other in envelope - skip
+                    }
+                    
+                    // For walls in same system, add context
+                    if (wallIsInEnvelope && otherIsInEnvelope) {
+                        const systemCheck = areWallsInSameSlabSystem(wall, otherWall, true);
+                        if (systemCheck.inSameSystem) {
+                            slabContext = " (" + systemCheck.reason + ")";
+                        }
+                    }
+                }
                 
                 // Determine if walls are on same level or adjacent levels
                 const onSameFloor = wall.floorId === otherWall.floorId;
@@ -2146,21 +3102,24 @@
                             if (wall.overlapsInProjection(otherWall)) {
                                 violations.push({
                                     type: 'error',
-                                    message: `Aligned walls overlap with Wall ${otherIndex + 1}`
+                                    message: `Aligned walls overlap${slabContext}`,
+                                    conflictingWallIndex: otherIndex
                                 });
                             }
 
                             if (!wall.sameOrientation(otherWall)) {
                                 violations.push({
                                     type: 'error',
-                                    message: `Aligned walls must share orientation with Wall ${otherIndex + 1}`
+                                    message: `Aligned walls must share orientation${slabContext}`,
+                                    conflictingWallIndex: otherIndex
                                 });
                             }
 
                             if (wall.thickness !== otherWall.thickness) {
                                 violations.push({
                                     type: 'error',
-                                    message: `Aligned walls must share thickness with Wall ${otherIndex + 1}`
+                                    message: `Aligned walls must share thickness${slabContext}`,
+                                    conflictingWallIndex: otherIndex
                                 });
                             }
                         } else {
@@ -2207,7 +3166,8 @@
                             if (dist < minDist - 2) {
                                 violations.push({
                                     type: 'error',
-                                    message: `Too close to Wall ${otherIndex + 1} (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm`
+                                    message: `Too close (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm${slabContext}`,
+                                    conflictingWallIndex: otherIndex
                                 });
                             }
                         }
@@ -2228,14 +3188,16 @@
                                 if (!wall.sameOrientation(otherWall)) {
                                     violations.push({
                                         type: 'error',
-                                        message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share orientation`
+                                        message: `Overlapping wall on different floor must share orientation${slabContext}`,
+                                        conflictingWallIndex: otherIndex
                                     });
                                 }
 
                                 if (wall.thickness !== otherWall.thickness) {
                                     violations.push({
                                         type: 'error',
-                                        message: `Overlapping wall on different floor (Wall ${otherIndex + 1}) must share thickness`
+                                        message: `Overlapping wall on different floor must share thickness${slabContext}`,
+                                        conflictingWallIndex: otherIndex
                                     });
                                 }
                             }
@@ -2274,7 +3236,8 @@
                             if (dist < minDist - 2) {
                                 violations.push({
                                     type: 'error',
-                                    message: `Too close to Wall ${otherIndex + 1} on adjacent floor (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm`
+                                    message: `Too close to wall on adjacent floor (${Math.round(dist / 10)}cm). Minimum: ${minDist / 10}cm${slabContext}`,
+                                    conflictingWallIndex: otherIndex
                                 });
                             }
                         }
@@ -2328,12 +3291,16 @@
 
         // Mouse handling
         let currentMousePos = null;
+        let currentMouseScreenPos = null; // Mouse position in screen coordinates
 
         function getMousePosition(e) {
             const rect = canvas.getBoundingClientRect();
             // Get mouse position in canvas pixels
             const canvasX = e.clientX - rect.left;
             const canvasY = e.clientY - rect.top;
+            
+            // Store screen position for tooltips
+            currentMouseScreenPos = { x: canvasX, y: canvasY };
             
             // Transform from screen space to world space (inverse of pan/zoom)
             const worldX = (canvasX - panOffset.x) / zoomLevel;
@@ -2420,6 +3387,7 @@
                     } else {
                         // Valid stretch - save to history and deselect
                         addToHistory();
+                        updateBuildingEnvelopes(); // Update slabs after stretching
                         selectedWalls = [];
                     }
                 }
@@ -2449,6 +3417,7 @@
                 
                 // Only deselect if wall was actually moved
                 if (wasMoved) {
+                    updateBuildingEnvelopes(); // Update slabs after moving
                     selectedWalls = [];
                 }
                 
@@ -2650,6 +3619,9 @@
                     // Add to history for undo
                     addToHistory([newWall]);
                     
+                    // Update building envelopes (waffle slabs)
+                    updateBuildingEnvelopes();
+                    
                     drawingWall = null;
                     tempPoint = null;
                     wallFlipped = false; // Reset flip state
@@ -2767,6 +3739,7 @@
                 // Use filter to avoid index shifting issues when deleting multiple walls
                 walls = walls.filter(wall => !selectedWalls.includes(wall));
                 selectedWalls = [];
+                updateBuildingEnvelopes(); // Update slabs after deletion
                 showToast(`Deleted ${count} wall${count > 1 ? 's' : ''}`, 'info', 2000);
                 updateUI();
                 validateAllWalls();
@@ -2857,6 +3830,7 @@
                 // Use filter to avoid index shifting issues when deleting multiple walls
                 walls = walls.filter(wall => !selectedWalls.includes(wall));
                 selectedWalls = [];
+                updateBuildingEnvelopes(); // Update slabs after deletion
                 updateUI();
                 validateAllWalls();
                 showToast(`Deleted ${count} wall${count > 1 ? 's' : ''}`, 'info', 2000);
@@ -2871,6 +3845,7 @@
                 tempPoint = null;
                 history = []; // Clear undo history
                 redoHistory = []; // Clear redo history
+                updateBuildingEnvelopes(); // Update slabs after clearing
                 updateUI();
                 draw();
             }
@@ -2996,6 +3971,12 @@
 
         document.getElementById('showOtherFloors').addEventListener('change', draw);
         document.getElementById('showLevelsAbove').addEventListener('change', draw);
+        
+        document.getElementById('slabRestrictionsEnabled').addEventListener('change', (e) => {
+            slabRestrictionsEnabled = e.target.checked;
+            validateAllWalls();
+            draw();
+        });
 
         document.getElementById('wallThickness').addEventListener('change', () => {
             // Update thickness for all selected walls
@@ -3032,6 +4013,7 @@
                     const removedFloorId = floors[floors.length - 1].id;
                     floors.pop();
                     walls = walls.filter(w => w.floorId !== removedFloorId);
+                    updateBuildingEnvelopes(); // Update slabs after removing floor
                     if (currentFloorId === removedFloorId) {
                         currentFloorId = floors[floors.length - 1].id;
                     }
@@ -3058,8 +4040,11 @@
         updateUI();
         
         // Show initial message
-        document.getElementById('violationsList').innerHTML = 
-            '<div class="no-violations">Draw walls to start. Click once for start point, move horizontally or vertically, then click for end point.</div>';
+        const violationsList = document.getElementById('violationsList');
+        if (violationsList) {
+            violationsList.innerHTML = 
+                '<div class="no-violations">Draw walls to start. Click once for start point, move horizontally or vertically, then click for end point.</div>';
+        }
         }
 
         function updateFloorDropdown() {
@@ -3122,7 +4107,8 @@
                 <div class="rule-section">
                     <h3>1. Wall Dimensions</h3>
                     <ul>
-                        <li><strong>Minimum Length:</strong> 40 cm</li>
+                        <li><strong>Minimum Length:</strong> 60 cm</li>
+                        <li><strong>Length Grid:</strong> Walls must be multiples of 60 cm in length</li>
                         <li><strong>Thickness Options:</strong> 20 cm or 30 cm</li>
                     </ul>
                 </div>
