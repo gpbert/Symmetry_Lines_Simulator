@@ -433,7 +433,9 @@ function buildWallMesh(wall, group, material, idx, wallViolations, ext) {
     // Extended columns: col is the final center position (no offsets needed)
     // Non-extended columns: offset by dNorm*COLUMN_SIZE/2 + n*COLUMN_SIZE/2
     const colSize = mmToUnits(COLUMN_SIZE);
-    const colGeo = new THREE.BoxGeometry(colSize, wallHeight + 0.02, colSize);
+    // Slightly smaller than COLUMN_SIZE so columns render inside walls without z-fighting
+    const colInset = colSize * 0.95;
+    const colGeo = new THREE.BoxGeometry(colInset, wallHeight - 0.02, colInset);
 
     const colAX = ext?.colA
         ? ext.colA.x
