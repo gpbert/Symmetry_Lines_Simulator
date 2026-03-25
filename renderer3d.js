@@ -562,18 +562,87 @@ function buildEnvelopes() {
         const floorY = getFloorY(env.floorId);
         const mat = isCurrent ? materials.slab : materials.slabGhost;
 
+        // Expand polygon to external wall faces using each wall's actual normal vector.
+        // For each edge, find the matching wall and offset by wall.n * wall.thickness.
+        const poly = env.polygon;
+        const expandedPoly = [];
+
+        for (let i = 0; i < poly.length; i++) {
+            const curr = poly[i];
+            const next = poly[(i + 1) % poly.length];
+            const prev = poly[(i - 1 + poly.length) % poly.length];
+
+            // Find wall matching edge curr→next
+            let currWall = null;
+            if (env.wallIndices) {
+                for (const wIdx of env.wallIndices) {
+                    const w = state.walls[wIdx];
+                    if (!w) continue;
+                    const mAB = Math.abs(w.pointA.x - curr.x) < 5 && Math.abs(w.pointA.y - curr.y) < 5 &&
+                                Math.abs(w.pointB.x - next.x) < 5 && Math.abs(w.pointB.y - next.y) < 5;
+                    const mBA = Math.abs(w.pointB.x - curr.x) < 5 && Math.abs(w.pointB.y - curr.y) < 5 &&
+                                Math.abs(w.pointA.x - next.x) < 5 && Math.abs(w.pointA.y - next.y) < 5;
+                    if (mAB || mBA) { currWall = w; break; }
+                }
+            }
+
+            // Find wall matching edge prev→curr
+            let prevWall = null;
+            if (env.wallIndices) {
+                for (const wIdx of env.wallIndices) {
+                    const w = state.walls[wIdx];
+                    if (!w) continue;
+                    const mAB = Math.abs(w.pointA.x - prev.x) < 5 && Math.abs(w.pointA.y - prev.y) < 5 &&
+                                Math.abs(w.pointB.x - curr.x) < 5 && Math.abs(w.pointB.y - curr.y) < 5;
+                    const mBA = Math.abs(w.pointB.x - prev.x) < 5 && Math.abs(w.pointB.y - prev.y) < 5 &&
+                                Math.abs(w.pointA.x - curr.x) < 5 && Math.abs(w.pointA.y - curr.y) < 5;
+                    if (mAB || mBA) { prevWall = w; break; }
+                }
+            }
+
+            if (!currWall || !prevWall) {
+                expandedPoly.push({ x: curr.x, y: curr.y });
+                continue;
+            }
+
+            // Offset each edge by the wall's normal * thickness, then intersect
+            // Edge prev→curr offset by prevWall.n * prevWall.thickness
+            const p1x = curr.x + prevWall.n.x * prevWall.thickness;
+            const p1y = curr.y + prevWall.n.y * prevWall.thickness;
+            const d1x = curr.x - prev.x;
+            const d1y = curr.y - prev.y;
+
+            // Edge curr→next offset by currWall.n * currWall.thickness
+            const p2x = curr.x + currWall.n.x * currWall.thickness;
+            const p2y = curr.y + currWall.n.y * currWall.thickness;
+            const d2x = next.x - curr.x;
+            const d2y = next.y - curr.y;
+
+            const denom = d1x * d2y - d1y * d2x;
+            if (Math.abs(denom) < 0.001) {
+                // Parallel — just offset
+                expandedPoly.push({ x: p2x, y: p2y });
+            } else {
+                const t = ((p2x - p1x) * d2y - (p2y - p1y) * d2x) / denom;
+                expandedPoly.push({ x: p1x + t * d1x, y: p1y + t * d1y });
+            }
+        }
+
+        // Use expanded polygon for slabs (overrides env.polygon in makeSlabMesh)
+        const slabPolygon = expandedPoly;
+
         // Build slab in world space to avoid rotation offset issues.
         // Use THREE.ShapeGeometry for proper concave triangulation (earcut),
         // then transform the vertices to world XZ plane at the correct Y heights.
         function makeSlabMesh(yTop, thickness, material) {
             const yBottom = yTop - thickness;
 
-            // Create shape for triangulation (in 2D: shape X = world X, shape Y = world Z)
+            // Create shape for triangulation using expanded polygon
             const shape = new THREE.Shape();
-            const p0 = env.polygon[0];
+            const p0 = slabPolygon[0];
             shape.moveTo(mmToUnits(p0.x), mmToUnits(p0.y));
-            for (let i = 1; i < env.polygon.length; i++) {
-                shape.lineTo(mmToUnits(env.polygon[i].x), mmToUnits(env.polygon[i].y));
+            for (let i = 1; i < slabPolygon.length; i++) {
+                shape.lineTo(mmToUnits(slabPolygon[i].x), mmToUnits(slabPolygon[i].y));
             }
             shape.closePath();
 
@@ -607,18 +676,17 @@ function buildEnvelopes() {
                 }
             }
 
-            // Side faces — use the original polygon vertices (not ShapeGeometry vertices)
-            const n = env.polygon.length;
+            // Side faces — use the expanded polygon vertices
+            const n = slabPolygon.length;
             const sideBase = positions.length / 3;
-            // Add polygon vertices for sides (bottom then top)
             for (let i = 0; i < n; i++) {
-                const px = mmToUnits(env.polygon[i].x);
-                const pz = mmToUnits(env.polygon[i].y);
+                const px = mmToUnits(slabPolygon[i].x);
+                const pz = mmToUnits(slabPolygon[i].y);
                 positions.push(px, yBottom, pz);
             }
             for (let i = 0; i < n; i++) {
-                const px = mmToUnits(env.polygon[i].x);
-                const pz = mmToUnits(env.polygon[i].y);
+                const px = mmToUnits(slabPolygon[i].x);
+                const pz = mmToUnits(slabPolygon[i].y);
                 positions.push(px, yTop, pz);
             }
             for (let i = 0; i < n; i++) {
