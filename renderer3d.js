@@ -5,7 +5,8 @@ import * as sim from './sim.js';
 import { state } from './sim.js';
 
 const {
-    GRID_SIZE_EXTERNAL, GRID_SIZE_INTERNAL, COLUMN_SIZE, VOID_GRID
+    GRID_SIZE_EXTERNAL, GRID_SIZE_INTERNAL, COLUMN_SIZE, VOID_GRID,
+    MIN_DISTANCE_PARALLEL, MIN_DISTANCE_OPPOSITE
 } = sim;
 
 // ============================================================
@@ -13,6 +14,7 @@ const {
 // ============================================================
 const MM_TO_UNITS = 0.01;
 const FLOOR_HEIGHT_UNITS = 2700 * MM_TO_UNITS; // 27 units
+const SLAB_THICKNESS = 350 * MM_TO_UNITS; // 3.5 units
 
 function mmToUnits(mm) { return mm * MM_TO_UNITS; }
 function unitsToMm(u) { return u / MM_TO_UNITS; }
@@ -109,6 +111,22 @@ function initMaterials() {
         color: 0x2563eb,
         transparent: true,
         opacity: 0.08,
+        side: THREE.DoubleSide,
+    });
+    materials.slab = new THREE.MeshStandardMaterial({
+        color: 0xd1d5db, // Tailwind Gray-300
+        transparent: true,
+        opacity: 0.7,
+        roughness: 0.8,
+        metalness: 0,
+        side: THREE.DoubleSide,
+    });
+    materials.slabGhost = new THREE.MeshStandardMaterial({
+        color: 0xd1d5db,
+        transparent: true,
+        opacity: 0.3,
+        roughness: 0.8,
+        metalness: 0,
         side: THREE.DoubleSide,
     });
     materials.previewWall = new THREE.MeshStandardMaterial({
@@ -448,18 +466,25 @@ function buildVoidMesh(v, material) {
 }
 
 // ============================================================
-// Envelope rendering
+// Envelope rendering (extruded slabs)
 // ============================================================
 function buildEnvelopes() {
     clearGroup(envelopeGroup);
 
     state.buildingEnvelopes.forEach(env => {
-        if (env.floorId !== state.currentFloorId) return;
         if (!env.polygon || env.polygon.length < 3) return;
 
-        const floorY = getFloorY(env.floorId);
-        const shape = new THREE.Shape();
+        const isCurrent = env.floorId === state.currentFloorId;
+        const isBelow = env.floorId < state.currentFloorId && state.showLevelsBelow;
+        const isAbove = env.floorId > state.currentFloorId && state.showLevelsAbove;
 
+        if (!isCurrent && !isBelow && !isAbove) return;
+
+        const floorY = getFloorY(env.floorId);
+        const mat = isCurrent ? materials.slab : materials.slabGhost;
+
+        // Build a THREE.Shape from the envelope polygon
+        const shape = new THREE.Shape();
         const p0 = env.polygon[0];
         shape.moveTo(mmToUnits(p0.x), mmToUnits(p0.y));
         for (let i = 1; i < env.polygon.length; i++) {
@@ -468,12 +493,22 @@ function buildEnvelopes() {
         }
         shape.closePath();
 
-        const geo = new THREE.ShapeGeometry(shape);
-        const mesh = new THREE.Mesh(geo, materials.envelope);
-        // ShapeGeometry is on XY plane; rotate to XZ (floor plane)
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.y = floorY + 0.005;
-        envelopeGroup.add(mesh);
+        const extrudeSettings = { depth: SLAB_THICKNESS, bevelEnabled: false };
+
+        // Floor slab: sits below the wall base (floorY - SLAB_THICKNESS to floorY)
+        const floorSlabGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        const floorSlabMesh = new THREE.Mesh(floorSlabGeo, mat);
+        // Rotate so XY shape maps to XZ floor plane, Z extrusion maps to Y (vertical)
+        floorSlabMesh.rotation.x = -Math.PI / 2;
+        floorSlabMesh.position.y = floorY - SLAB_THICKNESS;
+        envelopeGroup.add(floorSlabMesh);
+
+        // Roof slab: sits above the wall tops (floorY + FLOOR_HEIGHT_UNITS to + SLAB_THICKNESS)
+        const roofSlabGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        const roofSlabMesh = new THREE.Mesh(roofSlabGeo, mat);
+        roofSlabMesh.rotation.x = -Math.PI / 2;
+        roofSlabMesh.position.y = floorY + FLOOR_HEIGHT_UNITS;
+        envelopeGroup.add(roofSlabMesh);
     });
 }
 
