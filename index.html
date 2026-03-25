@@ -555,6 +555,12 @@
                     </svg>
                     Flip Wall (Space)
                 </button>
+                <button id="drawVoidBtn" class="btn btn-secondary">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="1.5" y="1.5" width="11" height="11" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2"/>
+                    </svg>
+                    Draw Void
+                </button>
             </div>
             <div class="property-group" style="margin-top: 16px;">
                 <label class="checkbox-label">
@@ -1177,6 +1183,11 @@
         // Grid snapping - snap to 300mm external grid only
         function snapToGrid(value, gridSize = GRID_SIZE_EXTERNAL) {
             return Math.round(value / gridSize) * gridSize;
+        }
+
+        // Snap to 600mm void grid
+        function snapToVoidGrid(value) {
+            return Math.round(value / VOID_GRID) * VOID_GRID;
         }
 
         // Snap a wall length to the nearest lower multiple of WALL_LENGTH_GRID
@@ -3646,6 +3657,13 @@
 
                 tempPoint = snapLengthToGrid(drawingWall, constrained);
             }
+
+            if (currentMode === 'void' && drawingVoid) {
+                tempPoint = {
+                    x: snapToVoidGrid(pos.x),
+                    y: snapToVoidGrid(pos.y)
+                };
+            }
             draw();
         });
 
@@ -3849,6 +3867,47 @@
                         validateAllWalls();
                     }
                 }
+            } else if (currentMode === 'void') {
+                if (!drawingVoid) {
+                    const snappedX = snapToVoidGrid(pos.x);
+                    const snappedY = snapToVoidGrid(pos.y);
+                    drawingVoid = { startX: snappedX, startY: snappedY };
+                } else {
+                    const snappedX = snapToVoidGrid(pos.x);
+                    const snappedY = snapToVoidGrid(pos.y);
+                    const x = Math.min(drawingVoid.startX, snappedX);
+                    const y = Math.min(drawingVoid.startY, snappedY);
+                    const width = Math.abs(snappedX - drawingVoid.startX);
+                    const height = Math.abs(snappedY - drawingVoid.startY);
+                    if (width < MIN_VOID_SIZE || height < MIN_VOID_SIZE) {
+                        showToast(`Void is too small. Minimum size: ${MIN_VOID_SIZE / 10}cm x ${MIN_VOID_SIZE / 10}cm`, 'error');
+                        drawingVoid = null;
+                        draw();
+                        return;
+                    }
+                    const overlaps = voids.some(v =>
+                        v.floorId === currentFloorId &&
+                        x < v.x + v.width && x + width > v.x &&
+                        y < v.y + v.height && y + height > v.y
+                    );
+                    if (overlaps) {
+                        showToast('Voids cannot overlap', 'error');
+                        drawingVoid = null;
+                        draw();
+                        return;
+                    }
+                    const newVoid = {
+                        id: generateVoidId(),
+                        floorId: currentFloorId,
+                        x: x, y: y,
+                        width: width, height: height
+                    };
+                    voids.push(newVoid);
+                    addToHistory([newVoid], 'void');
+                    drawingVoid = null;
+                    draw();
+                    showToast('Void placed', 'info', 2000);
+                }
             }
         });
 
@@ -3917,6 +3976,18 @@
                 validateAllWalls();
                 draw();
             }
+        });
+
+        document.getElementById('drawVoidBtn').addEventListener('click', () => {
+            currentMode = 'void';
+            drawingWall = null;
+            tempPoint = null;
+            drawingVoid = null;
+            selectedWalls = [];
+            selectedVoid = null;
+            clearDrawingToast();
+            updateModeUI();
+            draw();
         });
         
         // Keyboard shortcuts
@@ -4215,6 +4286,9 @@
             } else if (currentMode === 'delete') {
                 document.getElementById('deleteBtn').classList.add('active');
                 canvas.style.cursor = 'pointer';
+            } else if (currentMode === 'void') {
+                document.getElementById('drawVoidBtn').classList.add('active');
+                canvas.style.cursor = 'crosshair';
             }
         }
 
