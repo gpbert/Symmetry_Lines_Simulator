@@ -1665,5 +1665,57 @@ export function computeWallExtensions() {
         if (ext.extA || ext.extB) extensions.set(idx, ext);
     });
 
+    // Second pass: vertical walls at concave corners get shortened
+    state.walls.forEach((wall, idx) => {
+        const isVert = Math.abs(wall.d.y) > Math.abs(wall.d.x);
+        if (!isVert) return;
+
+        const ext = extensions.get(idx) || { extA: null, extB: null, colA: null, colB: null };
+
+        for (const ep of ['A', 'B']) {
+            const pt = ep === 'A' ? wall.pointA : wall.pointB;
+            const bodyPt = ep === 'A' ? wall.pointB : wall.pointA;
+            const towardBodyY = Math.sign(bodyPt.y - pt.y);
+
+            for (let oi = 0; oi < state.walls.length; oi++) {
+                if (oi === idx) continue;
+                const other = state.walls[oi];
+                if (wall.floorId !== other.floorId) continue;
+                if (!wall.isPerpendicularTo(other)) continue;
+
+                const dA = Math.hypot(pt.x - other.pointA.x, pt.y - other.pointA.y);
+                const dB = Math.hypot(pt.x - other.pointB.x, pt.y - other.pointB.y);
+                if (dA >= TOL && dB >= TOL) continue;
+
+                // Connected to horizontal wall.
+                const hIntY = other.pointA.y;
+                const hExtY = other.pointA.y + other.n.y * other.thickness;
+                const connectPt = dA < TOL ? other.pointA : other.pointB;
+
+                // Near face = H face closest to V's body (for concave shortening)
+                const nearFace = Math.abs(hIntY - bodyPt.y) <= Math.abs(hExtY - bodyPt.y) ? hIntY : hExtY;
+
+                // Only handle concave: nearFace is TOWARD V's body
+                const isConcave = Math.sign(nearFace - pt.y) === towardBodyY && Math.abs(nearFace - pt.y) > 1;
+                if (!isConcave) break;
+
+                const targetY = nearFace;
+                const extPt = { x: pt.x, y: targetY };
+
+                // Column: at shortened end, offset toward body, plus normal into wall thickness
+                const col = {
+                    x: connectPt.x + wall.n.x * COLUMN_SIZE / 2,
+                    y: targetY + towardBodyY * COLUMN_SIZE / 2
+                };
+
+                if (ep === 'A') { ext.extA = extPt; ext.colA = col; }
+                else { ext.extB = extPt; ext.colB = col; }
+                break;
+            }
+        }
+
+        if (ext.extA || ext.extB) extensions.set(idx, ext);
+    });
+
     return extensions;
 }
