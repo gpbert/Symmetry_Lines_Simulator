@@ -347,6 +347,30 @@ function buildWalls() {
             }
 
             buildWallMesh(wall, wallGroup, mat, idx, wallViolations);
+
+            // Endpoint handles for selected walls
+            if (isSelected) {
+                const floorY = getFloorY(wall.floorId);
+                const wallHeight = mmToUnits(wall.height);
+                const handleGeo = new THREE.SphereGeometry(mmToUnits(80), 8, 8);
+                const handleMat = new THREE.MeshBasicMaterial({ color: 0x2563eb });
+
+                const handleA = new THREE.Mesh(handleGeo, handleMat);
+                handleA.position.set(
+                    mmToUnits(wall.pointA.x),
+                    floorY + wallHeight / 2,
+                    mmToUnits(wall.pointA.y)
+                );
+                wallGroup.add(handleA);
+
+                const handleB = new THREE.Mesh(handleGeo, handleMat);
+                handleB.position.set(
+                    mmToUnits(wall.pointB.x),
+                    floorY + wallHeight / 2,
+                    mmToUnits(wall.pointB.y)
+                );
+                wallGroup.add(handleB);
+            }
         }
     });
 }
@@ -434,6 +458,28 @@ function buildVoids() {
         if (v.floorId === state.currentFloorId) {
             const isSelected = state.selectedVoid === v;
             buildVoidMesh(v, isSelected ? materials.voidSelected : materials.voidDefault);
+
+            // Resize handles for selected void (8 points: corners + edge midpoints)
+            if (isSelected) {
+                const floorY = getFloorY(v.floorId);
+                const handleGeo = new THREE.SphereGeometry(mmToUnits(60), 8, 8);
+                const handleMat = new THREE.MeshBasicMaterial({ color: 0x2563eb });
+                const handles = [
+                    [v.x, v.y],
+                    [v.x + v.width / 2, v.y],
+                    [v.x + v.width, v.y],
+                    [v.x + v.width, v.y + v.height / 2],
+                    [v.x + v.width, v.y + v.height],
+                    [v.x + v.width / 2, v.y + v.height],
+                    [v.x, v.y + v.height],
+                    [v.x, v.y + v.height / 2],
+                ];
+                handles.forEach(([hx, hy]) => {
+                    const sphere = new THREE.Mesh(handleGeo, handleMat);
+                    sphere.position.set(mmToUnits(hx), floorY + 0.05, mmToUnits(hy));
+                    voidGroup.add(sphere);
+                });
+            }
         }
     });
 }
@@ -513,68 +559,92 @@ function buildEnvelopes() {
 }
 
 // ============================================================
-// Void-mode restricted zones
+// Restricted zones (void mode + draw mode)
 // ============================================================
+
+/**
+ * Build a single zone plane for a wall face.
+ * @param {Wall} wall - The wall object
+ * @param {number} faceOffset - Distance from internal face (0 = internal, thickness = external)
+ * @param {number} normalDir - Direction multiplier for normal (+1 outward, -1 inward)
+ * @param {number} zoneDepth - How far the zone extends from the face (mm)
+ * @param {number} color - Hex color
+ * @param {number} opacity - Opacity value
+ * @param {number} floorY - Y position in 3D units
+ */
+function buildZonePlane(wall, faceOffset, normalDir, zoneDepth, color, opacity, floorY) {
+    if (wall.length <= 0) return;
+
+    // Face corners in mm
+    const ax = wall.pointA.x + wall.n.x * faceOffset;
+    const ay = wall.pointA.y + wall.n.y * faceOffset;
+    const bx = wall.pointB.x + wall.n.x * faceOffset;
+    const by = wall.pointB.y + wall.n.y * faceOffset;
+
+    // Outward normal (in zone extension direction)
+    const nx = wall.n.x * normalDir;
+    const ny = wall.n.y * normalDir;
+
+    // Mid-point of the zone
+    const midFaceX = (ax + bx) / 2;
+    const midFaceY = (ay + by) / 2;
+    const centerX = midFaceX + nx * zoneDepth / 2;
+    const centerY = midFaceY + ny * zoneDepth / 2;
+
+    const geo = new THREE.PlaneGeometry(mmToUnits(zoneDepth), mmToUnits(wall.length));
+    const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+    });
+    const zoneMesh = new THREE.Mesh(geo, mat);
+    zoneMesh.rotation.x = -Math.PI / 2;
+    zoneMesh.rotation.z = -Math.atan2(wall.d.x, wall.d.y);
+
+    zoneMesh.position.set(
+        mmToUnits(centerX),
+        floorY + 0.005,
+        mmToUnits(centerY)
+    );
+
+    zoneGroup.add(zoneMesh);
+}
+
 function buildZones() {
     clearGroup(zoneGroup);
 
-    if (state.currentMode !== 'void') return;
+    // Void-mode zones (purple, VOID_GRID distance)
+    if (state.currentMode === 'void') {
+        const floorY = getFloorY(state.currentFloorId);
+        const floorWalls = state.walls.filter(w => w.floorId === state.currentFloorId);
 
-    const floorY = getFloorY(state.currentFloorId);
-    const floorWalls = state.walls.filter(w => w.floorId === state.currentFloorId);
+        floorWalls.forEach(wall => {
+            const isInEnvelope = sim.isWallInEnvelope(wall);
+            const faceOffset = isInEnvelope ? wall.thickness : 0;
+            const dirSign = isInEnvelope ? 1 : -1;
 
-    floorWalls.forEach(wall => {
-        const isInEnvelope = sim.isWallInEnvelope(wall);
-
-        // Restricted face origin: external face for envelope walls, internal face for non-envelope
-        const faceOffset = isInEnvelope ? wall.thickness : 0;
-        // Normal direction for zone extension
-        const dirSign = isInEnvelope ? 1 : -1;
-
-        // Face corners in mm (sim space: X/Y -> Three.js X/Z)
-        const ax = wall.pointA.x + wall.n.x * faceOffset;
-        const ay = wall.pointA.y + wall.n.y * faceOffset;
-        const bx = wall.pointB.x + wall.n.x * faceOffset;
-        const by = wall.pointB.y + wall.n.y * faceOffset;
-
-        // Outward normal (in zone extension direction)
-        const nx = wall.n.x * dirSign;
-        const ny = wall.n.y * dirSign;
-
-        // Zone extends VOID_GRID mm outward from the face
-        const depth = VOID_GRID;
-
-        // Mid-point of the zone (centre of the rectangular plane)
-        const midFaceX = (ax + bx) / 2;
-        const midFaceY = (ay + by) / 2;
-        const centerX = midFaceX + nx * depth / 2;
-        const centerY = midFaceY + ny * depth / 2;
-
-        const length = wall.length;
-        const geo = new THREE.PlaneGeometry(mmToUnits(depth), mmToUnits(length));
-        const mat = new THREE.MeshBasicMaterial({
-            color: 0xa855f7,
-            transparent: true,
-            opacity: 0.1,
-            side: THREE.DoubleSide,
+            buildZonePlane(wall, faceOffset, dirSign, VOID_GRID, 0xa855f7, 0.1, floorY);
         });
-        const zoneMesh = new THREE.Mesh(geo, mat);
-        zoneMesh.rotation.x = -Math.PI / 2;
+    }
 
-        // The PlaneGeometry lies in the XY plane (before rotation.x) and after rotation
-        // sits flat in the XZ plane. Its local X axis maps to Three.js X and local Y to Three.js Z.
-        // We need it oriented along the wall direction, then offset outward.
-        // Apply wall's Y rotation so the length axis aligns with the wall.
-        zoneMesh.rotation.z = -Math.atan2(wall.d.x, wall.d.y);
-
-        zoneMesh.position.set(
-            mmToUnits(centerX),
-            floorY + 0.005,
-            mmToUnits(centerY)
+    // Draw-mode zones (parallel + opposite restriction distances)
+    if (state.currentMode === 'draw') {
+        const relevantWalls = state.walls.filter(w =>
+            w.floorId === state.currentFloorId ||
+            Math.abs(w.floorId - state.currentFloorId) === 1
         );
 
-        zoneGroup.add(zoneMesh);
-    });
+        relevantWalls.forEach(wall => {
+            const floorY = getFloorY(wall.floorId);
+
+            // Zone on the column/internal face side (parallel restriction, 600mm) — orange
+            buildZonePlane(wall, 0, -1, MIN_DISTANCE_PARALLEL, 0xf59e0b, 0.06, floorY);
+
+            // Zone on the external face side (opposite restriction, 1200mm) — red
+            buildZonePlane(wall, wall.thickness, 1, MIN_DISTANCE_OPPOSITE, 0xdc2626, 0.04, floorY);
+        });
+    }
 }
 
 // ============================================================
