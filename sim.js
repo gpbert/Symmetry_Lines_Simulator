@@ -1642,14 +1642,7 @@ export function computeWallExtensions() {
                     x: connectPt.x + towardBodyX * COLUMN_SIZE / 2,
                     y: connectPt.y + towardVBodyY * COLUMN_SIZE / 2
                 };
-                console.log(`CORNER DEBUG: wall[${idx}] ep=${ep}`,
-                    `\n  H.pt=(${pt.x},${pt.y}) H.bodyPt=(${bodyPt.x},${bodyPt.y}) towardBodyX=${towardBodyX}`,
-                    `\n  V.connectPt=(${connectPt.x},${connectPt.y}) V.otherPt=(${otherBodyPt.x},${otherBodyPt.y}) towardVBodyY=${towardVBodyY}`,
-                    `\n  V.n=(${other.n.x},${other.n.y}) V.thickness=${other.thickness}`,
-                    `\n  targetX=${targetX} extPt=(${extPt.x},${extPt.y})`,
-                    `\n  col=(${col.x},${col.y})`,
-                    `\n  V column would be at: (${connectPt.x + other.n.x*COLUMN_SIZE/2}, ${connectPt.y + towardVBodyY*COLUMN_SIZE/2})`
-                );
+
 
                 if (ep === 'A') { ext.extA = extPt; ext.colA = col; }
                 else { ext.extB = extPt; ext.colB = col; }
