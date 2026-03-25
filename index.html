@@ -2307,6 +2307,26 @@
             return null;
         }
 
+        function getVoidResizeHandle(pos, v) {
+            if (!v) return null;
+            const tolerance = 150; // mm
+            const handles = [
+                { x: v.x, y: v.y, handle: 'nw' },
+                { x: v.x + v.width / 2, y: v.y, handle: 'n' },
+                { x: v.x + v.width, y: v.y, handle: 'ne' },
+                { x: v.x + v.width, y: v.y + v.height / 2, handle: 'e' },
+                { x: v.x + v.width, y: v.y + v.height, handle: 'se' },
+                { x: v.x + v.width / 2, y: v.y + v.height, handle: 's' },
+                { x: v.x, y: v.y + v.height, handle: 'sw' },
+                { x: v.x, y: v.y + v.height / 2, handle: 'w' },
+            ];
+            for (const h of handles) {
+                const dist = Math.sqrt(Math.pow(pos.x - h.x, 2) + Math.pow(pos.y - h.y, 2));
+                if (dist < tolerance) return h.handle;
+            }
+            return null;
+        }
+
         // Draw building envelopes (waffle slabs) with cross-floor visibility
         function drawBuildingEnvelopes() {
             const showLevelsBelow = document.getElementById('showOtherFloors').checked;
@@ -2580,7 +2600,29 @@
             voids.filter(v => v.floorId === currentFloorId).forEach(v => {
                 drawVoid(v);
             });
-            
+
+            // Draw resize handles for selected void
+            if (selectedVoid && selectedVoid.floorId === currentFloorId) {
+                const v = selectedVoid;
+                const handleSize = 6 / zoomLevel;
+                ctx.fillStyle = '#2563eb';
+                const handles = [
+                    { x: v.x, y: v.y, cursor: 'nw' },
+                    { x: v.x + v.width / 2, y: v.y, cursor: 'n' },
+                    { x: v.x + v.width, y: v.y, cursor: 'ne' },
+                    { x: v.x + v.width, y: v.y + v.height / 2, cursor: 'e' },
+                    { x: v.x + v.width, y: v.y + v.height, cursor: 'se' },
+                    { x: v.x + v.width / 2, y: v.y + v.height, cursor: 's' },
+                    { x: v.x, y: v.y + v.height, cursor: 'sw' },
+                    { x: v.x, y: v.y + v.height / 2, cursor: 'w' },
+                ];
+                handles.forEach(h => {
+                    ctx.beginPath();
+                    ctx.rect(mmToPx(h.x) - handleSize / 2, mmToPx(h.y) - handleSize / 2, handleSize, handleSize);
+                    ctx.fill();
+                });
+            }
+
             // Draw endpoint handles in select mode (only for selected walls)
             if (currentMode === 'select' && selectedWalls.length > 0) {
                 selectedWalls.forEach((wall) => {
@@ -3631,6 +3673,34 @@
                 draw();
             }
             
+            if (resizingVoid) {
+                const v = resizingVoid.void;
+                const overlaps = voids.some(other =>
+                    other !== v && other.floorId === v.floorId &&
+                    v.x < other.x + other.width && v.x + v.width > other.x &&
+                    v.y < other.y + other.height && v.y + v.height > other.y
+                );
+                if (overlaps) {
+                    v.x = originalVoidState.x; v.y = originalVoidState.y;
+                    v.width = originalVoidState.width; v.height = originalVoidState.height;
+                    showToast('Resize would overlap another void', 'error');
+                } else {
+                    const operation = {
+                        objectType: 'void-resize',
+                        voidRef: v,
+                        oldState: { ...originalVoidState },
+                        newState: { x: v.x, y: v.y, width: v.width, height: v.height },
+                        timestamp: Date.now()
+                    };
+                    history.push(operation);
+                    redoHistory = [];
+                }
+                resizingVoid = null;
+                originalVoidState = null;
+                canvas.style.cursor = 'pointer';
+                draw();
+            }
+
             if (isDragging) {
                 // Check if wall was actually moved
                 const selectedWall = selectedWalls[0];
@@ -3670,6 +3740,26 @@
             
             const pos = getMousePosition(e);
             currentMousePos = pos;
+
+            // Handle void resizing
+            if (currentMode === 'select' && resizingVoid) {
+                const v = resizingVoid.void;
+                const h = resizingVoid.handle;
+                const snappedX = snapToVoidGrid(pos.x);
+                const snappedY = snapToVoidGrid(pos.y);
+                let newX = v.x, newY = v.y, newW = v.width, newH = v.height;
+                if (h.includes('w')) { newX = snappedX; newW = originalVoidState.x + originalVoidState.width - snappedX; }
+                if (h.includes('e')) { newW = snappedX - originalVoidState.x; }
+                if (h.includes('n')) { newY = snappedY; newH = originalVoidState.y + originalVoidState.height - snappedY; }
+                if (h.includes('s')) { newH = snappedY - originalVoidState.y; }
+                if (h === 'n' || h === 's') { newX = v.x; newW = v.width; }
+                if (h === 'e' || h === 'w') { newY = v.y; newH = v.height; }
+                if (newW >= MIN_VOID_SIZE && newH >= MIN_VOID_SIZE) {
+                    v.x = newX; v.y = newY; v.width = newW; v.height = newH;
+                }
+                draw();
+                return;
+            }
 
             // Handle wall stretching
             if (currentMode === 'select' && stretchingWall) {
@@ -3892,6 +3982,17 @@
                     validateAllWalls();
                 }
             } else if (currentMode === 'select') {
+                // Check if clicked on a resize handle of the selected void (takes priority)
+                if (selectedVoid) {
+                    const handle = getVoidResizeHandle(pos, selectedVoid);
+                    if (handle) {
+                        resizingVoid = { void: selectedVoid, handle: handle };
+                        originalVoidState = { x: selectedVoid.x, y: selectedVoid.y, width: selectedVoid.width, height: selectedVoid.height };
+                        canvas.style.cursor = handle + '-resize';
+                        return;
+                    }
+                }
+
                 // Check if clicked near an endpoint of a SELECTED wall (for stretching)
                 const endpointHit = getEndpointNearPoint(pos.x, pos.y);
                 
