@@ -1636,10 +1636,11 @@ export function computeWallExtensions() {
                 const otherBodyPt = dA < TOL ? other.pointB : other.pointA;
                 const towardVBodyY = Math.sign(otherBodyPt.y - connectPt.y);
                 // V's column center is at connectPt.y + towardVBodyY * COLUMN_SIZE/2
-                // H's column goes on the other side: connectPt.y - towardVBodyY * COLUMN_SIZE/2
+                // H's column sits inside the corner, adjacent to V's column:
+                // connectPt.y + towardVBodyY * COLUMN_SIZE/2 (same side as V's body)
                 const col = {
                     x: connectPt.x,
-                    y: connectPt.y - towardVBodyY * COLUMN_SIZE / 2
+                    y: connectPt.y + towardVBodyY * COLUMN_SIZE / 2
                 };
 
                 if (ep === 'A') { ext.extA = extPt; ext.colA = col; }
