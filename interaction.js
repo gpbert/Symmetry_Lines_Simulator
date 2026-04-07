@@ -24,6 +24,7 @@ let updateDrawingToastFn = null;
 let drawingWall = null;
 let tempPoint = null;
 let wallFlipped = false;
+
 let drawingToastElement = null;
 let drawingVoid = null;
 let isDragging = false;
@@ -83,6 +84,7 @@ export function resetDrawingState() {
     drawingWall = null;
     tempPoint = null;
     wallFlipped = false;
+
     drawingVoid = null;
     clearDrawingToast();
 }
@@ -111,8 +113,10 @@ function onMouseDown(e) {
 
     if (state.currentMode === 'draw') {
         if (!drawingWall) {
-            drawingWall = { x: pos.x, y: pos.y };
-            tempPoint = { x: pos.x, y: pos.y };
+            wallFlipped = false;
+            const nudged = sim.nudgeStartPointOutOfZones(pos.x, pos.y, state.currentFloorId);
+            drawingWall = { x: nudged.x, y: nudged.y };
+            tempPoint = { x: nudged.x, y: nudged.y };
         } else {
             // Finish drawing
             const thickness = parseInt(document.getElementById('wallThickness').value);
@@ -148,29 +152,62 @@ function onMouseDown(e) {
                 return;
             }
 
-            const restriction = sim.isWallInRestrictedZone(newWall);
-            if (restriction.restricted) {
-                let message = 'Cannot place wall here.';
-                if (restriction.zone.reason) {
-                    message += ` ${restriction.zone.reason}`;
-                } else if (restriction.zone.distance) {
-                    message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
-                }
-                showToast(message, 'error');
-                drawingWall = null;
-                tempPoint = null;
-                clearDrawingToast();
-                r.draw();
-                return;
-            }
+            // Check if this wall can merge with an existing aligned wall
+            const merge = sim.findMergeableWall(newWall);
+            if (merge) {
+                sim.addToHistory();
+                const merged = sim.computeMergedWall(newWall, merge.wall);
+                merge.wall.pointA = { x: merged.ax, y: merged.ay };
+                merge.wall.pointB = { x: merged.bx, y: merged.by };
+                merge.wall.thickness = newWall.thickness;
+                merge.wall.updateVectors();
 
-            state.walls.push(newWall);
-            sim.addToHistory([newWall]);
-            updateBuildingEnvelopes();
+                // Convert all other aligned walls on the same grid line to the new thickness
+                const allAligned = sim.findAllAlignedWalls(newWall);
+                allAligned.forEach(({ wall }) => {
+                    if (wall !== merge.wall && wall.thickness !== newWall.thickness) {
+                        wall.thickness = newWall.thickness;
+                        wall.updateVectors();
+                    }
+                });
+
+                updateBuildingEnvelopes();
+            } else {
+                const restriction = sim.isWallInRestrictedZone(newWall);
+                if (restriction.restricted) {
+                    let message = 'Cannot place wall here.';
+                    if (restriction.zone.reason) {
+                        message += ` ${restriction.zone.reason}`;
+                    } else if (restriction.zone.distance) {
+                        message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                    }
+                    showToast(message, 'error');
+                    drawingWall = null;
+                    tempPoint = null;
+                    clearDrawingToast();
+                    r.draw();
+                    return;
+                }
+
+                state.walls.push(newWall);
+                sim.addToHistory([newWall]);
+
+                // Convert aligned walls on adjacent floors to the new thickness
+                const allAligned = sim.findAllAlignedWalls(newWall);
+                allAligned.forEach(({ wall }) => {
+                    if (wall !== newWall && wall.thickness !== newWall.thickness) {
+                        wall.thickness = newWall.thickness;
+                        wall.updateVectors();
+                    }
+                });
+
+                updateBuildingEnvelopes();
+            }
 
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+        
             clearDrawingToast();
             updateUI();
             validateAllWalls();
@@ -434,7 +471,13 @@ function onMouseMove(e) {
     }
 
     const pos = r.screenToWorld(e);
-    currentMousePos = { x: pos.x, y: pos.y };
+    // Nudge hover point out of restriction zones before first click
+    if (state.currentMode === 'draw' && !drawingWall) {
+        const nudged = sim.nudgeStartPointOutOfZones(pos.x, pos.y, state.currentFloorId);
+        currentMousePos = { x: nudged.x, y: nudged.y };
+    } else {
+        currentMousePos = { x: pos.x, y: pos.y };
+    }
     currentMouseScreenPos = { x: pos.screenX, y: pos.screenY };
 
     // Handle void resizing
@@ -537,6 +580,39 @@ function onMouseMove(e) {
         }
 
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained);
+
+        // Auto-flip logic:
+        // 1. Same grid line: flip to match existing wall's orientation
+        // 2. Different grid line + restricted: flip to resolve restriction
+        if (tempPoint) {
+            const thickness = parseInt(document.getElementById('wallThickness').value);
+
+            const normalWall = new Wall(
+                drawingWall.x, drawingWall.y, tempPoint.x, tempPoint.y,
+                thickness, 2700, null, state.currentFloorId
+            );
+
+            if (normalWall.length > 0) {
+                const alignedWall = sim.findAlignedExistingWall(normalWall);
+                if (alignedWall) {
+                    // Same grid line — flip to match existing wall's orientation
+                    wallFlipped = !normalWall.sameOrientation(alignedWall);
+                } else {
+                    // Different grid line — check restrictions
+                    const restriction = sim.isWallInRestrictedZone(normalWall);
+                    if (restriction.restricted) {
+                        const flippedWall = new Wall(
+                            tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y,
+                            thickness, 2700, null, state.currentFloorId
+                        );
+                        const flippedRestriction = sim.isWallInRestrictedZone(flippedWall);
+                        if (!flippedRestriction.restricted) {
+                            wallFlipped = true;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Handle void drawing preview
@@ -586,7 +662,20 @@ function onKeyDown(e) {
     if (e.code === 'Space') {
         if (drawingWall && tempPoint) {
             e.preventDefault();
-            wallFlipped = !wallFlipped;
+            // Only allow flip if the result would be valid
+            const thickness = parseInt(document.getElementById('wallThickness').value);
+            const flippedStartX = !wallFlipped ? tempPoint.x : drawingWall.x;
+            const flippedStartY = !wallFlipped ? tempPoint.y : drawingWall.y;
+            const flippedEndX   = !wallFlipped ? drawingWall.x : tempPoint.x;
+            const flippedEndY   = !wallFlipped ? drawingWall.y : tempPoint.y;
+            const flippedWall = new Wall(
+                flippedStartX, flippedStartY, flippedEndX, flippedEndY,
+                thickness, 2700, null, state.currentFloorId
+            );
+            const restriction = sim.isWallInRestrictedZone(flippedWall);
+            if (!restriction.restricted) {
+                wallFlipped = !wallFlipped;
+            }
             r.draw();
         } else if (state.selectedWalls.length > 0) {
             e.preventDefault();
@@ -608,6 +697,7 @@ function onKeyDown(e) {
         drawingWall = null;
         tempPoint = null;
         wallFlipped = false;
+    
         clearDrawingToast();
         r.draw();
     }

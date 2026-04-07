@@ -1130,6 +1130,162 @@ export function getRestrictedZones(wall) {
     return zones;
 }
 
+// Find an existing wall that a new wall can merge with:
+// same floor, parallel, aligned (dist < 10), same thickness, overlapping or adjacent
+// Orientation doesn't need to match — merged wall adopts existing wall's orientation
+export function findMergeableWall(newWall) {
+    for (let i = 0; i < state.walls.length; i++) {
+        const existing = state.walls[i];
+        const floorDiff = Math.abs(newWall.floorId - existing.floorId);
+        if (floorDiff > 1) continue;
+        if (!existing.isParallelTo(newWall)) continue;
+        const dist = newWall.distanceToWall(existing);
+        if (dist >= 10) continue;
+        // No thickness check — different thickness walls on same line are mergeable
+
+        // Check overlap or touching in projection along wall axis
+        const isHorizontal = Math.abs(existing.d.x) > Math.abs(existing.d.y);
+        let min1, max1, min2, max2;
+        if (isHorizontal) {
+            min1 = Math.min(newWall.pointA.x, newWall.pointB.x);
+            max1 = Math.max(newWall.pointA.x, newWall.pointB.x);
+            min2 = Math.min(existing.pointA.x, existing.pointB.x);
+            max2 = Math.max(existing.pointA.x, existing.pointB.x);
+        } else {
+            min1 = Math.min(newWall.pointA.y, newWall.pointB.y);
+            max1 = Math.max(newWall.pointA.y, newWall.pointB.y);
+            min2 = Math.min(existing.pointA.y, existing.pointB.y);
+            max2 = Math.max(existing.pointA.y, existing.pointB.y);
+        }
+
+        if (max1 >= min2 - 1 && max2 >= min1 - 1) {
+            return { wall: existing, index: i };
+        }
+    }
+    return null;
+}
+
+// Find ALL walls on the same grid line (any floor within 1, any thickness)
+export function findAllAlignedWalls(newWall) {
+    const results = [];
+    for (let i = 0; i < state.walls.length; i++) {
+        const existing = state.walls[i];
+        const floorDiff = Math.abs(newWall.floorId - existing.floorId);
+        if (floorDiff > 1) continue;
+        if (!existing.isParallelTo(newWall)) continue;
+        const dist = newWall.distanceToWall(existing);
+        if (dist < 10) {
+            results.push({ wall: existing, index: i });
+        }
+    }
+    return results;
+}
+
+// Find an existing wall on the same grid line (regardless of overlap)
+// Returns the existing wall so caller can match orientation
+// Checks current floor and adjacent floors
+export function findAlignedExistingWall(newWall) {
+    for (const existing of state.walls) {
+        const floorDiff = Math.abs(newWall.floorId - existing.floorId);
+        if (floorDiff > 1) continue;
+        if (!existing.isParallelTo(newWall)) continue;
+        const dist = newWall.distanceToWall(existing);
+        if (dist < 10) {
+            return existing;
+        }
+    }
+    return null;
+}
+
+// Compute the merged wall endpoints from two aligned walls
+// Uses existingWall's orientation (A→B direction) for the result
+export function computeMergedWall(newWall, existingWall) {
+    const isHorizontal = Math.abs(existingWall.d.x) > Math.abs(existingWall.d.y);
+
+    // Use the internal face coordinate from the existing wall
+    const faceCoord = isHorizontal ? existingWall.pointA.y : existingWall.pointA.x;
+
+    // Find the full extent along the wall axis
+    let allCoords;
+    if (isHorizontal) {
+        allCoords = [newWall.pointA.x, newWall.pointB.x, existingWall.pointA.x, existingWall.pointB.x];
+    } else {
+        allCoords = [newWall.pointA.y, newWall.pointB.y, existingWall.pointA.y, existingWall.pointB.y];
+    }
+    const minCoord = Math.min(...allCoords);
+    const maxCoord = Math.max(...allCoords);
+
+    // Preserve A→B direction from existing wall's orientation
+    // Project the existing wall's A and B onto the wall axis direction
+    // Then assign min/max coords to maintain the same A→B ordering
+    const dir = existingWall.dNorm;
+    const aProj = isHorizontal ? existingWall.pointA.x : existingWall.pointA.y;
+    const bProj = isHorizontal ? existingWall.pointB.x : existingWall.pointB.y;
+    // If A has the smaller coordinate, A gets minCoord; otherwise A gets maxCoord
+    const aGetsMin = aProj < bProj;
+
+    let ax, ay, bx, by;
+    if (isHorizontal) {
+        ax = aGetsMin ? minCoord : maxCoord;
+        ay = faceCoord;
+        bx = aGetsMin ? maxCoord : minCoord;
+        by = faceCoord;
+    } else {
+        ax = faceCoord;
+        ay = aGetsMin ? minCoord : maxCoord;
+        bx = faceCoord;
+        by = aGetsMin ? maxCoord : minCoord;
+    }
+
+    return { ax, ay, bx, by };
+}
+// Check if a grid point falls inside any wall's parallel restriction zone
+// Returns the restricting wall info if found, null otherwise
+export function findRestrictingWallAtPoint(x, y, floorId) {
+    for (const wall of state.walls) {
+        const floorDiff = Math.abs(wall.floorId - floorId);
+        if (floorDiff > 1) continue;
+
+        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+        const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
+        const coord = isHorizontal ? y : x;
+        const dist = Math.abs(coord - internalFace);
+
+        // On the internal face line itself is OK (aligned walls are valid)
+        if (dist < 10) continue;
+
+        if (dist < MIN_DISTANCE_PARALLEL) {
+            return { wall, isHorizontal, internalFace };
+        }
+    }
+    return null;
+}
+
+// Nudge a grid point out of restriction zones to the nearest valid grid position
+// Returns adjusted {x, y} snapped to GRID_SIZE_EXTERNAL
+export function nudgeStartPointOutOfZones(x, y, floorId) {
+    const restriction = findRestrictingWallAtPoint(x, y, floorId);
+    if (!restriction) return { x, y };
+
+    const { isHorizontal, internalFace } = restriction;
+
+    if (isHorizontal) {
+        const direction = y > internalFace ? 1 : -1;
+        const targetY = internalFace + direction * MIN_DISTANCE_PARALLEL;
+        const snappedY = direction > 0
+            ? Math.ceil(targetY / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL
+            : Math.floor(targetY / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL;
+        return { x, y: snappedY };
+    } else {
+        const direction = x > internalFace ? 1 : -1;
+        const targetX = internalFace + direction * MIN_DISTANCE_PARALLEL;
+        const snappedX = direction > 0
+            ? Math.ceil(targetX / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL
+            : Math.floor(targetX / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL;
+        return { x: snappedX, y };
+    }
+}
+
 export function isWallInRestrictedZone(newWall) {
     // Predictive slab system detection for preview walls
     // Use endpoint (cursor position) for more accurate prediction
@@ -1176,23 +1332,8 @@ export function isWallInRestrictedZone(newWall) {
             const bodiesOverlap = dist < maxBodyOverlapDist;
 
             // Same-floor: Check if aligned (internal faces close together)
+            // Auto-flip handles orientation, merge handles overlap, thickness conversion handles thickness
             if (onSameFloor && dist < 10) {
-                // Rule 1: Aligned walls on same floor must share orientation and thickness
-                if (!sameOrientation || !sameThickness) {
-                    return {
-                        restricted: true,
-                        wall: existingWall,
-                        zone: { distance: 600, reason: 'Same-floor aligned walls must share orientation and thickness' }
-                    };
-                }
-                // Also can't overlap
-                if (hasOverlap) {
-                    return {
-                        restricted: true,
-                        wall: existingWall,
-                        zone: { distance: 0, reason: 'Same-floor aligned walls cannot overlap' }
-                    };
-                }
                 continue;
             }
 
@@ -1200,21 +1341,9 @@ export function isWallInRestrictedZone(newWall) {
             const floorDiff = Math.abs(newWall.floorId - existingWall.floorId);
 
             if (onDifferentFloor && floorDiff <= 1) {
-                if (dist < 10 && sameOrientation && sameThickness) {
-                    continue; // Same gridline, same orientation/thickness - always valid
-                }
-
-                if (hasOverlap && bodiesOverlap) {
-                    if (!sameOrientation || !sameThickness) {
-                        return {
-                            restricted: true,
-                            wall: existingWall,
-                            zone: { distance: 600, reason: 'Cross-floor overlap requires matching thickness and orientation' }
-                        };
-                    }
-                    if (dist < 10) {
-                        continue; // Directly overlapping - valid placement
-                    }
+                // Same grid line on adjacent floor — auto-flip/merge/thickness handles it
+                if (dist < 10) {
+                    continue;
                 }
             }
 

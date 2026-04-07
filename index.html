@@ -711,6 +711,11 @@
 
         let activeRenderer = renderer2D;
 
+        // Expose for testing
+        window.__sim = sim;
+        window.__state = state;
+        window.__interactionState = interactionState;
+
         const {
             GRID_SIZE_EXTERNAL, MIN_WALL_LENGTH, MIN_VOID_SIZE
         } = sim;

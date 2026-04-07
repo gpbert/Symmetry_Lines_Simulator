@@ -808,23 +808,19 @@ function buildZones() {
         });
     }
 
-    // Draw-mode zones (parallel + opposite restriction distances)
-    if (state.currentMode === 'draw') {
-        const relevantWalls = state.walls.filter(w =>
-            w.floorId === state.currentFloorId ||
-            Math.abs(w.floorId - state.currentFloorId) === 1
-        );
+    // Persistent restriction zones — all red
+    const relevantWalls = state.walls.filter(w =>
+        w.floorId === state.currentFloorId ||
+        Math.abs(w.floorId - state.currentFloorId) === 1
+    );
 
-        relevantWalls.forEach(wall => {
-            const floorY = getFloorY(wall.floorId);
+    relevantWalls.forEach(wall => {
+        const floorY = getFloorY(wall.floorId);
 
-            // Zone on the column/internal face side (parallel restriction, 600mm) — orange
-            buildZonePlane(wall, 0, -1, MIN_DISTANCE_PARALLEL, 0xf59e0b, 0.06, floorY);
-
-            // Zone on the external face side (opposite restriction, 1200mm) — red
-            buildZonePlane(wall, wall.thickness, 1, MIN_DISTANCE_OPPOSITE, 0xdc2626, 0.04, floorY);
-        });
-    }
+        // 600mm zone on both sides of internal face
+        buildZonePlane(wall, 0, -1, MIN_DISTANCE_PARALLEL, 0xdc2626, 0.06, floorY);
+        buildZonePlane(wall, 0, 1, MIN_DISTANCE_PARALLEL, 0xdc2626, 0.06, floorY);
+    });
 }
 
 // ============================================================

@@ -116,35 +116,55 @@ function drawGrid() {
     }
 }
 
-function drawRestrictedZones() {
-    state.walls.forEach(wall => {
-        const zones = sim.getRestrictedZones(wall);
+function drawRestrictedZones(skipIndices = new Set()) {
+    const relevantWalls = state.walls.filter((w, idx) =>
+        !skipIndices.has(idx) && (
+            w.floorId === state.currentFloorId ||
+            Math.abs(w.floorId - state.currentFloorId) === 1
+        )
+    );
 
-        zones.forEach(zone => {
-            ctx.fillStyle = zone.type === 'opposite' ?
-                'rgba(220, 38, 38, 0.1)' :
-                'rgba(245, 158, 11, 0.08)';
+    // Compute visible world bounds in mm for clamping infinite zone edges
+    const visibleLeft = (-panOffset.x) / zoomLevel;
+    const visibleTop = (-panOffset.y) / zoomLevel;
+    const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
+    const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
+    const margin = 100000;
+    const infiniteLeft = pxToMm(visibleLeft - margin);
+    const infiniteRight = pxToMm(visibleRight + margin);
+    const infiniteTop = pxToMm(visibleTop - margin);
+    const infiniteBottom = pxToMm(visibleBottom + margin);
 
-            ctx.fillRect(
-                mmToPx(zone.x1),
-                mmToPx(zone.y1),
-                mmToPx(zone.x2 - zone.x1),
-                mmToPx(zone.y2 - zone.y1)
-            );
+    const gridStep = GRID_SIZE_EXTERNAL;
 
-            ctx.strokeStyle = zone.type === 'opposite' ?
-                'rgba(220, 38, 38, 0.3)' :
-                'rgba(245, 158, 11, 0.2)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 4]);
-            ctx.strokeRect(
-                mmToPx(zone.x1),
-                mmToPx(zone.y1),
-                mmToPx(zone.x2 - zone.x1),
-                mmToPx(zone.y2 - zone.y1)
-            );
-            ctx.setLineDash([]);
-        });
+    relevantWalls.forEach(wall => {
+        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+        const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
+
+        ctx.strokeStyle = 'rgba(220, 38, 38, 0.5)';
+        ctx.lineWidth = 4 / zoomLevel;
+
+        // Find grid lines within the 600mm restriction zone on both sides
+        const zoneStart = internalFace - MIN_DISTANCE_PARALLEL;
+        const zoneEnd = internalFace + MIN_DISTANCE_PARALLEL;
+
+        // Iterate grid lines in the zone (skip boundary lines and the wall's own line)
+        const firstGrid = Math.ceil(zoneStart / gridStep) * gridStep;
+        for (let g = firstGrid; g <= zoneEnd; g += gridStep) {
+            const dist = Math.abs(g - internalFace);
+            if (dist < 10) continue; // skip the wall's own line
+            if (dist >= MIN_DISTANCE_PARALLEL - 2) continue; // skip boundary — placement is valid there
+
+            ctx.beginPath();
+            if (isHorizontal) {
+                ctx.moveTo(mmToPx(infiniteLeft), mmToPx(g));
+                ctx.lineTo(mmToPx(infiniteRight), mmToPx(g));
+            } else {
+                ctx.moveTo(mmToPx(g), mmToPx(infiniteTop));
+                ctx.lineTo(mmToPx(g), mmToPx(infiniteBottom));
+            }
+            ctx.stroke();
+        }
     });
 }
 
@@ -443,6 +463,29 @@ function draw() {
 
     drawGrid();
 
+    // Thickness override: when drawing on a grid line with different thickness walls,
+    // temporarily show those walls at the new thickness during preview
+    const thicknessOverrides = new Map(); // wallIndex -> newThickness
+    if (drawingWall && tempPoint && state.currentMode === 'draw') {
+        const previewThickness = parseInt(document.getElementById('wallThickness').value);
+        const trialWall = new Wall(
+            drawingWall.x, drawingWall.y, tempPoint.x, tempPoint.y,
+            previewThickness, 2700, null, state.currentFloorId
+        );
+        if (trialWall.length > 0) {
+            const alignedWalls = sim.findAllAlignedWalls(trialWall);
+            alignedWalls.forEach(({ wall, index }) => {
+                if (wall.thickness !== previewThickness) {
+                    thicknessOverrides.set(index, previewThickness);
+                }
+            });
+        }
+    }
+
+    // Draw persistent restriction zones (skip walls being thickness-converted)
+    const skipZoneIndices = new Set(thicknessOverrides.keys());
+    drawRestrictedZones(skipZoneIndices);
+
     // Draw building envelopes (waffle slabs) - BEFORE walls so walls appear on top
     drawBuildingEnvelopes();
 
@@ -475,8 +518,17 @@ function draw() {
             if (wall.floorId < state.currentFloorId) {
                 const floorsBelow = state.currentFloorId - wall.floorId;
                 const opacity = Math.max(0.1, 0.5 - (floorsBelow * 0.15));
-                const violations = wallViolations.get(idx) || [];
-                drawWall(wall, false, violations, opacity, violations.length > 0 ? null : '#9ca3af', extensions.get(idx));
+                const hasThicknessOverride = thicknessOverrides.has(idx);
+                const violations = hasThicknessOverride ? [] : (wallViolations.get(idx) || []);
+                let renderWall = wall;
+                if (hasThicknessOverride) {
+                    renderWall = new Wall(
+                        wall.pointA.x, wall.pointA.y, wall.pointB.x, wall.pointB.y,
+                        thicknessOverrides.get(idx), wall.height, wall.groupId, wall.floorId
+                    );
+                }
+                const overrideColor = hasThicknessOverride ? '#2563eb' : (violations.length > 0 ? null : '#9ca3af');
+                drawWall(renderWall, false, violations, opacity, overrideColor, extensions.get(idx));
             }
         });
     }
@@ -538,8 +590,17 @@ function draw() {
     state.walls.forEach((wall, idx) => {
         if (wall.floorId === state.currentFloorId) {
             const isSelected = state.selectedWalls.includes(wall);
-            const violations = wallViolations.get(idx) || [];
-            drawWall(wall, isSelected, violations, 1.0, null, extensions.get(idx));
+            const hasThicknessOverride = thicknessOverrides.has(idx);
+            const violations = hasThicknessOverride ? [] : (wallViolations.get(idx) || []);
+            let renderWall = wall;
+            if (hasThicknessOverride) {
+                renderWall = new Wall(
+                    wall.pointA.x, wall.pointA.y, wall.pointB.x, wall.pointB.y,
+                    thicknessOverrides.get(idx), wall.height, wall.groupId, wall.floorId
+                );
+            }
+            const overrideColor = hasThicknessOverride ? '#2563eb' : null;
+            drawWall(renderWall, isSelected, violations, 1.0, overrideColor, extensions.get(idx));
         }
     });
 
@@ -674,217 +735,114 @@ function draw() {
             state.currentFloorId
         );
 
-        // Draw dynamic restriction zones based on preview wall's orientation
+        // Draw dynamic restriction zones for nearby walls on DIFFERENT grid lines
         if (tempWall.length > 0) {
             state.walls.forEach((existingWall, idx) => {
                 const floorDiff = Math.abs(existingWall.floorId - state.currentFloorId);
-                if (floorDiff > 1) {
-                    return;
-                }
+                if (floorDiff > 1) return;
+                if (!existingWall.isParallelTo(tempWall)) return;
 
-                const isParallel = existingWall.isParallelTo(tempWall);
-                if (!isParallel) return;
+                const dist = tempWall.distanceToWall(existingWall);
 
-                let previewIsInEnvelope = false;
-                let existingIsInEnvelope = false;
+                // Same grid line — skip entirely (merge/thickness handles these)
+                if (dist < 10) return;
 
+                // Slab system filtering
                 if (state.slabRestrictionsEnabled) {
                     const predictedSystem = sim.getPredictedSlabSystemForPreviewWall(tempWall, true);
                     const existingWallSlabs = sim.getWallSlabSystem(existingWall);
-                    previewIsInEnvelope = predictedSystem !== null;
-
+                    const previewIsInEnvelope = predictedSystem !== null;
                     const existingPredictedSystem = sim.getPredictedSlabSystemForPreviewWall(existingWall);
-                    existingIsInEnvelope = existingWallSlabs.length > 0 || existingPredictedSystem !== null;
-
-                    if (previewIsInEnvelope && !existingIsInEnvelope) {
-                        return;
-                    } else if (!previewIsInEnvelope && existingIsInEnvelope) {
-                        return;
-                    }
+                    const existingIsInEnvelope = existingWallSlabs.length > 0 || existingPredictedSystem !== null;
+                    if (previewIsInEnvelope && !existingIsInEnvelope) return;
+                    if (!previewIsInEnvelope && existingIsInEnvelope) return;
                 }
 
+                // Calculate required distance
                 const previewMidX = (tempWall.pointA.x + tempWall.pointB.x) / 2;
                 const previewMidY = (tempWall.pointA.y + tempWall.pointB.y) / 2;
-
-                const dist = tempWall.distanceToWall(existingWall);
-                if (dist < 10) {
-                    const sameOrientation = tempWall.sameOrientation(existingWall);
-                    const sameThickness = tempWall.thickness === existingWall.thickness;
-
-                    if (sameOrientation && sameThickness) {
-                        return;
-                    }
-
-                    if (sameOrientation && !sameThickness) {
-                        const onDifferentFloor = existingWall.floorId !== state.currentFloorId;
-                        if (onDifferentFloor) {
-                            restrictingWalls.add(idx);
-                            return;
-                        }
-                    }
-
-                    const requiredDistance = MIN_DISTANCE_PARALLEL;
-
-                    restrictingWalls.add(idx);
-
-                    ctx.fillStyle = 'rgba(220, 38, 38, 0.12)';
-
-                    const isHorizontal = Math.abs(existingWall.d.y) < Math.abs(existingWall.d.x);
-                    const internalY = existingWall.pointA.y;
-                    const internalX = existingWall.pointA.x;
-
-                    const visibleLeft = (-panOffset.x) / zoomLevel;
-                    const visibleTop = (-panOffset.y) / zoomLevel;
-                    const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
-                    const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
-                    const margin = 100000;
-                    const infiniteLeft = pxToMm(visibleLeft - margin);
-                    const infiniteRight = pxToMm(visibleRight + margin);
-                    const infiniteTop = pxToMm(visibleTop - margin);
-                    const infiniteBottom = pxToMm(visibleBottom + margin);
-
-                    if (isHorizontal) {
-                        if (previewMidY > internalY) {
-                            ctx.fillRect(
-                                mmToPx(infiniteLeft),
-                                mmToPx(internalY),
-                                mmToPx(infiniteRight - infiniteLeft),
-                                mmToPx(requiredDistance)
-                            );
-                        } else {
-                            ctx.fillRect(
-                                mmToPx(infiniteLeft),
-                                mmToPx(internalY - requiredDistance),
-                                mmToPx(infiniteRight - infiniteLeft),
-                                mmToPx(requiredDistance)
-                            );
-                        }
-                    } else {
-                        if (previewMidX > internalX) {
-                            ctx.fillRect(
-                                mmToPx(internalX),
-                                mmToPx(infiniteTop),
-                                mmToPx(requiredDistance),
-                                mmToPx(infiniteBottom - infiniteTop)
-                            );
-                        } else {
-                            ctx.fillRect(
-                                mmToPx(internalX - requiredDistance),
-                                mmToPx(infiniteTop),
-                                mmToPx(requiredDistance),
-                                mmToPx(infiniteBottom - infiniteTop)
-                            );
-                        }
-                    }
-                    return;
-                }
-
-                const toPreview = {
-                    x: previewMidX - existingWall.pointA.x,
-                    y: previewMidY - existingWall.pointA.y
-                };
-
-                if (!tempWall.isParallelTo(existingWall)) {
-                    return;
-                }
-
-                const actualDistance = tempWall.distanceToWall(existingWall);
-
                 const orientationDot = tempWall.n.x * existingWall.n.x + tempWall.n.y * existingWall.n.y;
                 let requiredDistance;
 
                 if (orientationDot < -0.9) {
-                    const toPreviewWall = {
+                    const toPreview = {
                         x: previewMidX - existingWall.pointA.x,
                         y: previewMidY - existingWall.pointA.y
                     };
-
-                    const existingToPreview = toPreviewWall.x * existingWall.n.x + toPreviewWall.y * existingWall.n.y;
-
-                    if (existingToPreview > 0) {
-                        requiredDistance = MIN_DISTANCE_OPPOSITE;
-                    } else {
-                        requiredDistance = MIN_DISTANCE_PARALLEL;
-                    }
+                    const existingToPreview = toPreview.x * existingWall.n.x + toPreview.y * existingWall.n.y;
+                    requiredDistance = existingToPreview > 0 ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
                 } else {
                     requiredDistance = MIN_DISTANCE_PARALLEL;
                 }
 
-                if (actualDistance >= requiredDistance - 2) {
-                    return;
-                }
+                if (dist >= requiredDistance - 2) return;
 
+                // Render the restriction zone
                 restrictingWalls.add(idx);
-
-                const zoneColor = 'rgba(220, 38, 38, 0.12)';
-
-                const visibleLeft = -panOffset.x / zoomLevel;
-                const visibleTop = -panOffset.y / zoomLevel;
-                const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
-                const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
-                const margin = 100000;
-                const infiniteLeft = pxToMm(visibleLeft - margin);
-                const infiniteRight = pxToMm(visibleRight + margin);
-                const infiniteTop = pxToMm(visibleTop - margin);
-                const infiniteBottom = pxToMm(visibleBottom + margin);
-
-                const sideDot = toPreview.x * existingWall.n.x + toPreview.y * existingWall.n.y;
+                ctx.fillStyle = 'rgba(220, 38, 38, 0.12)';
 
                 const isHorizontal = Math.abs(existingWall.d.y) < Math.abs(existingWall.d.x);
-
-                ctx.fillStyle = zoneColor;
+                const visLeft = (-panOffset.x) / zoomLevel;
+                const visTop = (-panOffset.y) / zoomLevel;
+                const visRight = (canvas.width - panOffset.x) / zoomLevel;
+                const visBottom = (canvas.height - panOffset.y) / zoomLevel;
+                const m = 100000;
 
                 if (isHorizontal) {
                     const internalY = existingWall.pointA.y;
-
                     if (previewMidY > internalY) {
-                        ctx.fillRect(
-                            mmToPx(infiniteLeft),
-                            mmToPx(internalY),
-                            mmToPx(infiniteRight - infiniteLeft),
-                            mmToPx(requiredDistance)
-                        );
+                        ctx.fillRect(mmToPx(pxToMm(visLeft - m)), mmToPx(internalY),
+                            mmToPx(pxToMm(visRight - visLeft + 2 * m)), mmToPx(requiredDistance));
                     } else {
-                        ctx.fillRect(
-                            mmToPx(infiniteLeft),
-                            mmToPx(internalY - requiredDistance),
-                            mmToPx(infiniteRight - infiniteLeft),
-                            mmToPx(requiredDistance)
-                        );
+                        ctx.fillRect(mmToPx(pxToMm(visLeft - m)), mmToPx(internalY - requiredDistance),
+                            mmToPx(pxToMm(visRight - visLeft + 2 * m)), mmToPx(requiredDistance));
                     }
                 } else {
                     const internalX = existingWall.pointA.x;
-
                     if (previewMidX > internalX) {
-                        ctx.fillRect(
-                            mmToPx(internalX),
-                            mmToPx(infiniteTop),
-                            mmToPx(requiredDistance),
-                            mmToPx(infiniteBottom - infiniteTop)
-                        );
+                        ctx.fillRect(mmToPx(internalX), mmToPx(pxToMm(visTop - m)),
+                            mmToPx(requiredDistance), mmToPx(pxToMm(visBottom - visTop + 2 * m)));
                     } else {
-                        ctx.fillRect(
-                            mmToPx(internalX - requiredDistance),
-                            mmToPx(infiniteTop),
-                            mmToPx(requiredDistance),
-                            mmToPx(infiniteBottom - infiniteTop)
-                        );
+                        ctx.fillRect(mmToPx(internalX - requiredDistance), mmToPx(pxToMm(visTop - m)),
+                            mmToPx(requiredDistance), mmToPx(pxToMm(visBottom - visTop + 2 * m)));
                     }
                 }
             });
         }
 
-        // Check if wall is in restricted zone
-        const restriction = sim.isWallInRestrictedZone(tempWall);
-        const isRestricted = restriction.restricted;
+        // Check if wall can merge with an existing wall
+        const mergeTarget = sim.findMergeableWall(tempWall);
 
-        // Draw the preview wall
+        // Check if on same grid line (will merge once overlapping — skip restriction)
+        const onSameLine = sim.findAlignedExistingWall(tempWall);
+
+        // Check if wall is in restricted zone (skip if merging or on same grid line)
+        const restriction = (mergeTarget || onSameLine) ? { restricted: false } : sim.isWallInRestrictedZone(tempWall);
+        const isRestricted = restriction.restricted;
+        const isMerging = !!mergeTarget;
+
+        // Draw the preview wall (or merged preview)
         {
-            const segment = tempWall;
+            let segment = tempWall;
+
+            // If merging, show the full merged extent as the preview
+            if (isMerging) {
+                const merged = sim.computeMergedWall(tempWall, mergeTarget.wall);
+                segment = new Wall(
+                    merged.ax, merged.ay, merged.bx, merged.by,
+                    tempWall.thickness, tempWall.height, null, tempWall.floorId
+                );
+            }
+
             const external = segment.getExternalFacePoints();
 
-            ctx.fillStyle = isRestricted ? 'rgba(220, 38, 38, 0.2)' : 'rgba(34, 197, 94, 0.2)';
-            ctx.strokeStyle = isRestricted ? '#dc2626' : '#22c55e';
+            const previewColor = isMerging ? 'rgba(37, 99, 235, 0.2)' :
+                                 isRestricted ? 'rgba(220, 38, 38, 0.2)' : 'rgba(34, 197, 94, 0.2)';
+            const previewStroke = isMerging ? '#2563eb' :
+                                  isRestricted ? '#dc2626' : '#22c55e';
+
+            ctx.fillStyle = previewColor;
+            ctx.strokeStyle = previewStroke;
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
 
@@ -905,9 +863,9 @@ function draw() {
             ctx.lineTo(mmToPx(segment.pointB.x), mmToPx(segment.pointB.y));
             ctx.stroke();
 
-            ctx.strokeStyle = isRestricted ? '#dc2626' : '#22c55e';
+            ctx.strokeStyle = previewStroke;
             ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
+            ctx.setLineDash(isMerging ? [] : [5, 5]);
             ctx.beginPath();
             ctx.moveTo(mmToPx(external.a.x), mmToPx(external.a.y));
             ctx.lineTo(mmToPx(external.b.x), mmToPx(external.b.y));
@@ -915,7 +873,8 @@ function draw() {
             ctx.setLineDash([]);
 
             const columnSize = mmToPx(COLUMN_SIZE);
-            ctx.fillStyle = isRestricted ? 'rgba(220, 38, 38, 0.5)' : 'rgba(34, 197, 94, 0.5)';
+            ctx.fillStyle = isMerging ? 'rgba(37, 99, 235, 0.5)' :
+                            isRestricted ? 'rgba(220, 38, 38, 0.5)' : 'rgba(34, 197, 94, 0.5)';
 
             const colAX = segment.pointA.x + (COLUMN_SIZE / 2) * segment.dNorm.x + (COLUMN_SIZE / 2) * segment.n.x;
             const colAY = segment.pointA.y + (COLUMN_SIZE / 2) * segment.dNorm.y + (COLUMN_SIZE / 2) * segment.n.y;
@@ -937,7 +896,7 @@ function draw() {
         }
 
         // Draw start and end points
-        ctx.fillStyle = isRestricted ? '#dc2626' : '#22c55e';
+        ctx.fillStyle = isMerging ? '#2563eb' : isRestricted ? '#dc2626' : '#22c55e';
         ctx.beginPath();
         ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 6, 0, Math.PI * 2);
         ctx.fill();
