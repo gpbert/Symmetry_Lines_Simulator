@@ -3,7 +3,7 @@ import * as sim from './sim.js';
 import { Wall, state } from './sim.js';
 
 const {
-    GRID_SIZE_EXTERNAL, MIN_WALL_LENGTH, WALL_LENGTH_GRID,
+    GRID_SIZE_EXTERNAL, GRID_SIZE_INTERNAL, MIN_WALL_LENGTH, WALL_LENGTH_GRID,
     VOID_GRID, MIN_VOID_SIZE
 } = sim;
 
@@ -24,6 +24,7 @@ let updateDrawingToastFn = null;
 let drawingWall = null;
 let tempPoint = null;
 let wallFlipped = false;
+let isDrawingInternalWall = false;
 
 let drawingToastElement = null;
 let drawingVoid = null;
@@ -45,6 +46,7 @@ export const interactionState = {
     get drawingWall() { return drawingWall; },
     get tempPoint() { return tempPoint; },
     get wallFlipped() { return wallFlipped; },
+    get isDrawingInternalWall() { return isDrawingInternalWall; },
     get drawingVoid() { return drawingVoid; },
     get stretchingWall() { return stretchingWall; },
     get stretchingEndpoint() { return stretchingEndpoint; },
@@ -114,7 +116,16 @@ function onMouseDown(e) {
     if (state.currentMode === 'draw') {
         if (!drawingWall) {
             wallFlipped = false;
-            const nudged = sim.nudgeStartPointOutOfZones(pos.x, pos.y, state.currentFloorId);
+
+            // Detect if click is inside a closed envelope → internal wall mode (100mm grid)
+            const envelope = sim.getEnvelopeContainingPoint(pos.x, pos.y, state.currentFloorId);
+            isDrawingInternalWall = !!envelope;
+            const gridSize = isDrawingInternalWall ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
+
+            // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
+            const snappedX = sim.snapToGrid(pos.x, gridSize);
+            const snappedY = sim.snapToGrid(pos.y, gridSize);
+            const nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
             drawingWall = { x: nudged.x, y: nudged.y };
             tempPoint = { x: nudged.x, y: nudged.y };
         } else {
@@ -131,7 +142,8 @@ function onMouseDown(e) {
                 finalPos = { x: drawingWall.x, y: pos.y };
             }
 
-            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId);
+            const placementLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
+            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid);
 
             const startX = wallFlipped ? finalPos.x : drawingWall.x;
             const startY = wallFlipped ? finalPos.y : drawingWall.y;
@@ -173,6 +185,22 @@ function onMouseDown(e) {
 
                 updateBuildingEnvelopes();
             } else {
+                // Internal walls must stay within the envelope
+                if (isDrawingInternalWall) {
+                    const endEnvelope = sim.getEnvelopeContainingPoint(
+                        newWall.pointB.x, newWall.pointB.y, state.currentFloorId
+                    );
+                    if (!endEnvelope) {
+                        showToast('Internal wall must stay within the building envelope.', 'error');
+                        drawingWall = null;
+                        tempPoint = null;
+                        isDrawingInternalWall = false;
+                        clearDrawingToast();
+                        r.draw();
+                        return;
+                    }
+                }
+
                 const restriction = sim.isWallInRestrictedZone(newWall);
                 if (restriction.restricted) {
                     let message = 'Cannot place wall here.';
@@ -207,6 +235,7 @@ function onMouseDown(e) {
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+            isDrawingInternalWall = false;
         
             clearDrawingToast();
             updateUI();
@@ -473,7 +502,11 @@ function onMouseMove(e) {
     const pos = r.screenToWorld(e);
     // Nudge hover point out of restriction zones before first click
     if (state.currentMode === 'draw' && !drawingWall) {
-        const nudged = sim.nudgeStartPointOutOfZones(pos.x, pos.y, state.currentFloorId);
+        const hoverEnvelope = sim.getEnvelopeContainingPoint(pos.x, pos.y, state.currentFloorId);
+        const hoverGridSize = hoverEnvelope ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
+        const snappedX = sim.snapToGrid(pos.x, hoverGridSize);
+        const snappedY = sim.snapToGrid(pos.y, hoverGridSize);
+        const nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);
         currentMousePos = { x: nudged.x, y: nudged.y };
     } else {
         currentMousePos = { x: pos.x, y: pos.y };
@@ -502,19 +535,22 @@ function onMouseMove(e) {
 
     // Handle wall stretching
     if (state.currentMode === 'select' && stretchingWall) {
+        const wallIsInternal = sim.isInternalWall(stretchingWall);
+        const stretchGrid = wallIsInternal ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
+        const stretchLengthGrid = wallIsInternal ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
         const isHorizontal = Math.abs(originalStretchPoint.bx - originalStretchPoint.ax) >
                             Math.abs(originalStretchPoint.by - originalStretchPoint.ay);
 
         let newPoint;
         if (isHorizontal) {
             newPoint = {
-                x: sim.snapToGrid(pos.x, GRID_SIZE_EXTERNAL),
+                x: sim.snapToGrid(pos.x, stretchGrid),
                 y: stretchingEndpoint === 'A' ? originalStretchPoint.ay : originalStretchPoint.by
             };
         } else {
             newPoint = {
                 x: stretchingEndpoint === 'A' ? originalStretchPoint.ax : originalStretchPoint.bx,
-                y: sim.snapToGrid(pos.y, GRID_SIZE_EXTERNAL)
+                y: sim.snapToGrid(pos.y, stretchGrid)
             };
         }
 
@@ -525,7 +561,7 @@ function onMouseMove(e) {
         const stretchDx = Math.abs(newPoint.x - otherPoint.x);
         const stretchDy = Math.abs(newPoint.y - otherPoint.y);
         const rawLength = Math.max(stretchDx, stretchDy);
-        const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+        const snappedLength = Math.floor(rawLength / stretchLengthGrid) * stretchLengthGrid;
 
         if (snappedLength >= MIN_WALL_LENGTH) {
             if (isHorizontal) {
@@ -550,11 +586,13 @@ function onMouseMove(e) {
 
     // Handle wall dragging
     if (state.currentMode === 'select' && isDragging && state.selectedWalls.length === 1) {
+        const dragWallIsInternal = sim.isInternalWall(state.selectedWalls[0]);
+        const dragGrid = dragWallIsInternal ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
         const offsetX = pos.x - dragStartPos.x;
         const offsetY = pos.y - dragStartPos.y;
 
-        const snappedOffsetX = sim.snapToGrid(offsetX, GRID_SIZE_EXTERNAL);
-        const snappedOffsetY = sim.snapToGrid(offsetY, GRID_SIZE_EXTERNAL);
+        const snappedOffsetX = sim.snapToGrid(offsetX, dragGrid);
+        const snappedOffsetY = sim.snapToGrid(offsetY, dragGrid);
 
         const selectedWall = state.selectedWalls[0];
         selectedWall.pointA.x = originalWallPos.ax + snappedOffsetX;
@@ -579,7 +617,8 @@ function onMouseMove(e) {
             constrained = { x: drawingWall.x, y: pos.y };
         }
 
-        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId);
+        const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
+        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid);
 
         // Auto-flip logic:
         // 1. Same grid line: flip to match existing wall's orientation
@@ -687,6 +726,7 @@ function onKeyDown(e) {
                 wall.updateVectors();
             });
             validateAllWalls();
+            sim.updateBuildingEnvelopes();
             r.draw();
         }
     }
@@ -697,6 +737,7 @@ function onKeyDown(e) {
         drawingWall = null;
         tempPoint = null;
         wallFlipped = false;
+        isDrawingInternalWall = false;
     
         clearDrawingToast();
         r.draw();

@@ -31,8 +31,15 @@ The entire 2D simulator lives in one file containing inline CSS, HTML, and a sin
 - **Lines ~3290-4040**: Event listeners — mouse/keyboard handling for draw, select/move, delete, and wall stretching modes
 - **Lines ~4040-4100**: UI update helpers (floor dropdown, mode buttons, info panel)
 
+### Modular JS files (sim.js, renderer2d.js, renderer3d.js, interaction.js)
+Refactored modules for simulation logic, 2D/3D rendering, and user interaction.
+
 ### `index3d.html` (~740 lines)
-A separate Three.js-based 3D viewer (untracked, in progress).
+A separate Three.js-based 3D viewer (in progress).
+
+## Development
+
+Code changes are made **directly in this repo** — there is no VPS or remote deployment involved in development.
 
 ### `api/feedback.js`
 Vercel serverless function using `resend` to email user feedback.

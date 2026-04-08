@@ -117,6 +117,7 @@ function drawGrid() {
 }
 
 function drawRestrictedZones(skipIndices = new Set()) {
+    if (!state.showRestrictionLines) return;
     const relevantWalls = state.walls.filter((w, idx) =>
         !skipIndices.has(idx) && (
             w.floorId === state.currentFloorId ||
@@ -1183,8 +1184,10 @@ export const renderer2D = {
         const worldY = (canvasY - panOffset.y) / zoomLevel;
         let x = pxToMm(worldX);
         let y = pxToMm(worldY);
-        x = sim.snapToGrid(x, GRID_SIZE_EXTERNAL);
-        y = sim.snapToGrid(y, GRID_SIZE_EXTERNAL);
+        // Snap to the finest grid (100mm internal grid). Callers re-snap
+        // to 300mm for external walls as needed.
+        x = sim.snapToGrid(x, GRID_SIZE_INTERNAL);
+        y = sim.snapToGrid(y, GRID_SIZE_INTERNAL);
         return { x, y, screenX: canvasX, screenY: canvasY };
     },
 

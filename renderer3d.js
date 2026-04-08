@@ -794,6 +794,8 @@ function buildZonePlane(wall, faceOffset, normalDir, zoneDepth, color, opacity, 
 function buildZones() {
     clearGroup(zoneGroup);
 
+    if (!state.showRestrictionLines) return;
+
     // Void-mode zones (purple, VOID_GRID distance)
     if (state.currentMode === 'void') {
         const floorY = getFloorY(state.currentFloorId);
@@ -1058,8 +1060,9 @@ export const renderer3D = {
         let x = unitsToMm(pt.x);
         let y = unitsToMm(pt.z);
 
-        x = sim.snapToGrid(x, GRID_SIZE_EXTERNAL);
-        y = sim.snapToGrid(y, GRID_SIZE_EXTERNAL);
+        // Snap to the finest grid (100mm). Callers re-snap for external walls.
+        x = sim.snapToGrid(x, GRID_SIZE_INTERNAL);
+        y = sim.snapToGrid(y, GRID_SIZE_INTERNAL);
 
         return { x, y, screenX: canvasX, screenY: canvasY };
     },

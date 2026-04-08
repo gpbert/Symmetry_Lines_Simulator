@@ -603,8 +603,8 @@
             </div>
             <div class="property-group" style="margin-top: 16px;">
                 <label class="checkbox-label">
-                    <input type="checkbox" id="slabRestrictionsEnabled">
-                    Isolate slab systems
+                    <input type="checkbox" id="showRestrictionLines" checked>
+                    Show restriction lines
                 </label>
             </div>
         </div>
@@ -967,6 +967,7 @@
                     wall.updateVectors();
                 });
                 validateAllWalls();
+                sim.updateBuildingEnvelopes();
                 activeRenderer.draw();
             }
         });
@@ -1147,9 +1148,8 @@
             }
         });
 
-        document.getElementById('slabRestrictionsEnabled').addEventListener('change', (e) => {
-            state.slabRestrictionsEnabled = e.target.checked;
-            validateAllWalls();
+        document.getElementById('showRestrictionLines').addEventListener('change', (e) => {
+            state.showRestrictionLines = e.target.checked;
             activeRenderer.draw();
         });
 
@@ -1347,7 +1347,31 @@
                     </ul>
                 </div>
                 <div class="rule-section">
-                    <h3>8. Voids (Rule 7)</h3>
+                    <h3>8. Returning Wall Rule</h3>
+                    <ul>
+                        <li><strong>Trigger:</strong> Two walls on the same grid line (same lane) with the same orientation, connected via shared endpoints or part of the same envelope</li>
+                        <li><strong>Thickness Conversion:</strong> Both walls automatically convert to 30 cm (minimum floor)</li>
+                        <li><strong>Flip:</strong> The returning wall (whose external face points inward) flips around its center axis so columns face the correct interior side</li>
+                        <li><strong>Reversible:</strong> If the walls become disconnected, both revert to their original thickness and orientation</li>
+                        <li><strong>Restriction Zones:</strong> Returning wall pairs are exempt from distance rules against each other; new walls can connect at their endpoints</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>9. Internal Walls</h3>
+                    <ul>
+                        <li><strong>Detection:</strong> Automatically detected when drawing starts inside a closed building envelope</li>
+                        <li><strong>Grid:</strong> Internal walls snap to the 10 cm grid (vs 30 cm for external walls)</li>
+                        <li><strong>Length Grid:</strong> Wall length snaps to 10 cm increments</li>
+                        <li><strong>Minimum Length:</strong> 40 cm (same as external walls)</li>
+                        <li><strong>Boundary:</strong> Internal walls must stay within the envelope</li>
+                        <li><strong>Restriction Zones:</strong> External wall restriction zones apply to internal walls; internal walls create restriction zones for other internal walls only</li>
+                        <li><strong>Exempt From:</strong> Returning wall rule, envelope angle constraints</li>
+                    </ul>
+                </div>
+
+                <div class="rule-section">
+                    <h3>10. Voids (Rule 7)</h3>
                     <ul>
                         <li><strong>Placement Grid:</strong> Voids snap to the 60 cm grid</li>
                         <li><strong>Minimum Size:</strong> 60 cm x 60 cm</li>

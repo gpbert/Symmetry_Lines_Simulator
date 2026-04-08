@@ -256,6 +256,8 @@ export const state = {
     redoHistory: [],
     envelopeAngleViolations: [],
     nextVoidId: 1,
+    returningWallOverrides: new Map(),
+    showRestrictionLines: true, // Map<Wall, { originalPointA, originalPointB, originalThickness, wasFlipped }>
 };
 
 // ============================================================
@@ -275,8 +277,11 @@ export function snapToVoidGrid(value) {
 // Check if a coordinate is on a restricted grid line along a given axis.
 // axis: 'x' checks vertical walls' restriction zones (for horizontal wall endpoints),
 //        'y' checks horizontal walls' restriction zones (for vertical wall endpoints).
-function isEndpointRestricted(coord, axis, floorId) {
+function isEndpointRestricted(coord, axis, floorId, forInternalWall = false) {
     for (const wall of state.walls) {
+        // Internal walls don't restrict external wall endpoints
+        if (!forInternalWall && isInternalWall(wall)) continue;
+
         const floorDiff = Math.abs(wall.floorId - floorId);
         if (floorDiff > 1) continue;
 
@@ -298,23 +303,26 @@ function isEndpointRestricted(coord, axis, floorId) {
     return false;
 }
 
-// Snap a wall length to the nearest lower multiple of WALL_LENGTH_GRID,
+// Snap a wall length to the nearest lower multiple of the length grid,
 // skipping endpoint positions that land on restricted grid lines.
-export function snapLengthToGrid(startPoint, endPoint, floorId) {
+// lengthGrid defaults to WALL_LENGTH_GRID (300mm) for external walls;
+// pass GRID_SIZE_INTERNAL (100mm) for internal walls.
+export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WALL_LENGTH_GRID) {
+    const forInternalWall = lengthGrid === GRID_SIZE_INTERNAL;
     const dx = endPoint.x - startPoint.x;
     const dy = endPoint.y - startPoint.y;
 
     if (Math.abs(dx) > Math.abs(dy)) {
         const rawLength = Math.abs(dx);
-        let snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+        let snappedLength = Math.floor(rawLength / lengthGrid) * lengthGrid;
         const direction = dx > 0 ? 1 : -1;
 
         // Shrink until endpoint is not on a restricted grid line
         if (floorId !== undefined) {
             while (snappedLength >= MIN_WALL_LENGTH) {
                 const endX = startPoint.x + direction * snappedLength;
-                if (!isEndpointRestricted(endX, 'x', floorId)) break;
-                snappedLength -= WALL_LENGTH_GRID;
+                if (!isEndpointRestricted(endX, 'x', floorId, forInternalWall)) break;
+                snappedLength -= lengthGrid;
             }
         }
 
@@ -322,15 +330,15 @@ export function snapLengthToGrid(startPoint, endPoint, floorId) {
         return { x: startPoint.x + direction * snappedLength, y: startPoint.y };
     } else {
         const rawLength = Math.abs(dy);
-        let snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
+        let snappedLength = Math.floor(rawLength / lengthGrid) * lengthGrid;
         const direction = dy > 0 ? 1 : -1;
 
         // Shrink until endpoint is not on a restricted grid line
         if (floorId !== undefined) {
             while (snappedLength >= MIN_WALL_LENGTH) {
                 const endY = startPoint.y + direction * snappedLength;
-                if (!isEndpointRestricted(endY, 'y', floorId)) break;
-                snappedLength -= WALL_LENGTH_GRID;
+                if (!isEndpointRestricted(endY, 'y', floorId, forInternalWall)) break;
+                snappedLength -= lengthGrid;
             }
         }
 
@@ -646,6 +654,10 @@ export function detectBuildingEnvelopes(floorId) {
 
 // Update building envelopes for all floors
 export function updateBuildingEnvelopes(onComplete) {
+    // Revert returning wall overrides BEFORE detection so envelope detection
+    // sees clean (unmodified) wall geometry on the original grid lines.
+    revertReturningWallOverrides();
+
     const previousCount = state.buildingEnvelopes.length;
     state.buildingEnvelopes = [];
 
@@ -662,6 +674,9 @@ export function updateBuildingEnvelopes(onComplete) {
             });
         });
     });
+
+    // Apply returning wall rule after fresh envelope detection
+    applyReturningWallOverrides();
 
     const newCount = state.buildingEnvelopes.length;
 
@@ -711,6 +726,312 @@ export function pointInPolygon(point, polygon) {
         if (intersect) inside = !inside;
     }
     return inside;
+}
+
+// ============================================================
+// Internal Wall Detection
+// ============================================================
+
+// Returns the first envelope whose polygon contains the given point on the given floor,
+// or null if the point is not inside any envelope.
+export function getEnvelopeContainingPoint(x, y, floorId) {
+    for (const envelope of state.buildingEnvelopes) {
+        if (envelope.floorId !== floorId) continue;
+        if (pointInPolygon({ x, y }, envelope.polygon)) {
+            return envelope;
+        }
+    }
+    return null;
+}
+
+// Check if a point is inside or on the boundary of a polygon.
+function pointInsideOrOnPolygon(point, polygon) {
+    if (pointInPolygon(point, polygon)) return true;
+    // Also check if point is on any edge of the polygon (within tolerance)
+    for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i];
+        const b = polygon[(i + 1) % polygon.length];
+        if (pointNearLineSegment(point, a, b, 5)) return true;
+    }
+    return false;
+}
+
+// Derived state: a wall is "internal" if both endpoints are inside (or on the
+// boundary of) an envelope polygon, but the wall is NOT part of that envelope's
+// boundary (wallIndices).
+export function isInternalWall(wall) {
+    const wallIdx = state.walls.indexOf(wall);
+    for (const envelope of state.buildingEnvelopes) {
+        if (envelope.floorId !== wall.floorId) continue;
+        // Check if wall is on the envelope boundary — if so, it's external
+        if (envelope.wallIndices && envelope.wallIndices.includes(wallIdx)) continue;
+        // Check if both endpoints are inside or on the boundary of this envelope
+        const aInside = pointInsideOrOnPolygon(wall.pointA, envelope.polygon);
+        const bInside = pointInsideOrOnPolygon(wall.pointB, envelope.polygon);
+        if (aInside && bInside) return true;
+    }
+    return false;
+}
+
+// ============================================================
+// Returning Wall Rule
+// ============================================================
+
+// Flip a wall around its center axis (stays in same position, columns swap sides).
+// Swaps pointA/B to reverse orientation, then shifts both points so the wall
+// center line remains in the same position.
+export function flipWallAroundCenter(wall) {
+    const oldNx = wall.n.x;
+    const oldNy = wall.n.y;
+    const t = wall.thickness;
+
+    // Swap pointA and pointB (reverses direction and normal)
+    const tmp = wall.pointA;
+    wall.pointA = wall.pointB;
+    wall.pointB = tmp;
+
+    // Shift both points by oldNormal * thickness to keep center in place
+    // Before: internal at P, external at P + n*t, center at P + n*t/2
+    // After swap without shift: internal still at P, but normal now points opposite
+    // Shift by old n*t: internal → P + n*t (old external), external → P (old internal)
+    // Center stays at P + n*t/2
+    wall.pointA.x += oldNx * t;
+    wall.pointA.y += oldNy * t;
+    wall.pointB.x += oldNx * t;
+    wall.pointB.y += oldNy * t;
+
+    wall.updateVectors();
+}
+
+// Detect returning wall pairs within a single envelope.
+// Returns array of { wallA, wallB, returningWall } where returningWall is the
+// one whose internal face points away from the envelope interior.
+export function detectReturningWallPairs(envelope) {
+    const pairs = [];
+    const walls = envelope.wallIndices.map(idx => state.walls[idx]).filter(Boolean);
+
+    // Group walls by lane (same grid line for internal face)
+    const lanes = new Map(); // key → [wall, ...]
+    walls.forEach(wall => {
+        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+        const gridPos = isHorizontal ? Math.round(wall.pointA.y) : Math.round(wall.pointA.x);
+        const key = (isHorizontal ? 'H:' : 'V:') + gridPos;
+
+        if (!lanes.has(key)) lanes.set(key, []);
+        lanes.get(key).push(wall);
+    });
+
+    // Check each lane with exactly 2 walls
+    for (const [, laneWalls] of lanes) {
+        if (laneWalls.length !== 2) continue;
+
+        const [w1, w2] = laneWalls;
+        if (!w1.sameOrientation(w2)) continue;
+
+        // Determine which wall faces outward by testing a point offset along
+        // each wall's normal. The wall whose offset point is OUTSIDE the
+        // envelope polygon is the returning wall.
+        const mid1 = {
+            x: (w1.pointA.x + w1.pointB.x) / 2,
+            y: (w1.pointA.y + w1.pointB.y) / 2
+        };
+        const test1 = {
+            x: mid1.x + w1.n.x * 1, // 1mm offset along normal (toward external face)
+            y: mid1.y + w1.n.y * 1
+        };
+
+        const mid2 = {
+            x: (w2.pointA.x + w2.pointB.x) / 2,
+            y: (w2.pointA.y + w2.pointB.y) / 2
+        };
+        const test2 = {
+            x: mid2.x + w2.n.x * 1,
+            y: mid2.y + w2.n.y * 1
+        };
+
+        const inside1 = pointInPolygon(test1, envelope.polygon);
+        const inside2 = pointInPolygon(test2, envelope.polygon);
+
+        // The wall whose external-face test point is INSIDE the polygon has its
+        // external face pointing inward — that's the returning wall that needs to flip.
+        if (inside1 && !inside2) {
+            pairs.push({ wallA: w1, wallB: w2, returningWall: w1 });
+        } else if (!inside1 && inside2) {
+            pairs.push({ wallA: w1, wallB: w2, returningWall: w2 });
+        }
+        // If both inside or both outside, skip (ambiguous or not a returning pair)
+    }
+
+    return pairs;
+}
+
+// Revert all returning wall overrides, restoring original geometry.
+export function revertReturningWallOverrides() {
+    for (const [wall, override] of state.returningWallOverrides) {
+        wall.pointA = { ...override.originalPointA };
+        wall.pointB = { ...override.originalPointB };
+        wall.thickness = override.originalThickness;
+        wall.updateVectors();
+    }
+    state.returningWallOverrides.clear();
+}
+
+// Apply the returning wall override to a pair of walls.
+function applyReturningPairOverride(otherWall, returningWall) {
+    if (!state.returningWallOverrides.has(otherWall)) {
+        state.returningWallOverrides.set(otherWall, {
+            originalPointA: { ...otherWall.pointA },
+            originalPointB: { ...otherWall.pointB },
+            originalThickness: otherWall.thickness,
+            wasFlipped: false
+        });
+    }
+
+    if (!state.returningWallOverrides.has(returningWall)) {
+        state.returningWallOverrides.set(returningWall, {
+            originalPointA: { ...returningWall.pointA },
+            originalPointB: { ...returningWall.pointB },
+            originalThickness: returningWall.thickness,
+            wasFlipped: true
+        });
+    }
+
+    otherWall.thickness = Math.max(300, otherWall.thickness);
+    otherWall.updateVectors();
+
+    returningWall.thickness = Math.max(300, returningWall.thickness);
+    flipWallAroundCenter(returningWall);
+}
+
+// Check if two walls are transitively connected via shared endpoints.
+// Uses BFS on the wall endpoint graph. Only considers walls on the same floor.
+function areWallsConnected(wallA, wallB) {
+    if (wallA === wallB) return true;
+    const TOLERANCE = 5; // mm
+    const floorId = wallA.floorId;
+    if (wallB.floorId !== floorId) return false;
+
+    const floorWalls = state.walls.filter(w => w.floorId === floorId);
+    const idxA = floorWalls.indexOf(wallA);
+    const idxB = floorWalls.indexOf(wallB);
+    if (idxA < 0 || idxB < 0) return false;
+
+    // Build adjacency: two walls are adjacent if they share an endpoint
+    const adj = floorWalls.map(() => []);
+    for (let i = 0; i < floorWalls.length; i++) {
+        for (let j = i + 1; j < floorWalls.length; j++) {
+            const wi = floorWalls[i], wj = floorWalls[j];
+            const pts = [
+                [wi.pointA, wj.pointA], [wi.pointA, wj.pointB],
+                [wi.pointB, wj.pointA], [wi.pointB, wj.pointB]
+            ];
+            const connected = pts.some(([p1, p2]) =>
+                Math.abs(p1.x - p2.x) < TOLERANCE && Math.abs(p1.y - p2.y) < TOLERANCE
+            );
+            if (connected) {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+
+    // BFS from wallA to wallB
+    const visited = new Set([idxA]);
+    const queue = [idxA];
+    while (queue.length > 0) {
+        const cur = queue.shift();
+        if (cur === idxB) return true;
+        for (const next of adj[cur]) {
+            if (!visited.has(next)) {
+                visited.add(next);
+                queue.push(next);
+            }
+        }
+    }
+    return false;
+}
+
+// Detect returning wall pairs that aren't in an envelope yet (lane-based).
+// Only applies to walls that are connected via shared endpoints.
+// The later wall (higher index) is treated as the returning wall.
+function detectLaneBasedReturningPairs() {
+    const pairs = [];
+    const processed = new Set();
+
+    for (let i = 0; i < state.walls.length; i++) {
+        if (processed.has(i)) continue;
+        const w1 = state.walls[i];
+        // Returning wall rule only applies to external walls
+        if (isInternalWall(w1)) continue;
+        const isH1 = Math.abs(w1.d.x) > Math.abs(w1.d.y);
+        const gridPos1 = isH1 ? Math.round(w1.pointA.y) : Math.round(w1.pointA.x);
+
+        for (let j = i + 1; j < state.walls.length; j++) {
+            if (processed.has(j)) continue;
+            const w2 = state.walls[j];
+            if (isInternalWall(w2)) continue;
+            if (w2.floorId !== w1.floorId) continue;
+            if (!w1.isParallelTo(w2)) continue;
+
+            const isH2 = Math.abs(w2.d.x) > Math.abs(w2.d.y);
+            if (isH1 !== isH2) continue;
+
+            const gridPos2 = isH2 ? Math.round(w2.pointA.y) : Math.round(w2.pointA.x);
+            if (gridPos1 !== gridPos2) continue;
+            if (!w1.sameOrientation(w2)) continue;
+
+            // Must be connected via shared endpoints (not independent)
+            if (!areWallsConnected(w1, w2)) continue;
+
+            // Same lane, same orientation, connected. Later wall is the returning wall.
+            pairs.push({ otherWall: w1, returningWall: w2 });
+            processed.add(i);
+            processed.add(j);
+        }
+    }
+    return pairs;
+}
+
+// Detect and apply returning wall overrides.
+// Uses envelope-based detection when envelopes exist, falls back to lane-based
+// detection for pairs not yet in a closed envelope.
+export function applyReturningWallOverrides() {
+    const envelopeProcessed = new Set(); // wall indices already handled by envelope detection
+
+    // 1. Envelope-based detection (authoritative — uses polygon winding)
+    for (const envelope of state.buildingEnvelopes) {
+        const pairs = detectReturningWallPairs(envelope);
+
+        for (const { wallA, wallB, returningWall } of pairs) {
+            const otherWall = wallA === returningWall ? wallB : wallA;
+            applyReturningPairOverride(otherWall, returningWall);
+            envelopeProcessed.add(state.walls.indexOf(wallA));
+            envelopeProcessed.add(state.walls.indexOf(wallB));
+        }
+    }
+
+    // 2. Lane-based detection (for pairs not yet in a closed envelope)
+    const lanePairs = detectLaneBasedReturningPairs();
+    for (const { otherWall, returningWall } of lanePairs) {
+        const idx1 = state.walls.indexOf(otherWall);
+        const idx2 = state.walls.indexOf(returningWall);
+        if (envelopeProcessed.has(idx1) || envelopeProcessed.has(idx2)) continue;
+        applyReturningPairOverride(otherWall, returningWall);
+    }
+}
+
+// Check if a point is near any endpoint of a wall (pointA, pointB, or their external equivalents).
+function isNearWallEndpoint(x, y, wall, tolerance = 10) {
+    const ext = wall.getExternalFacePoints();
+    const endpoints = [wall.pointA, wall.pointB, ext.a, ext.b];
+    return endpoints.some(ep => Math.abs(x - ep.x) < tolerance && Math.abs(y - ep.y) < tolerance);
+}
+
+// Check if two walls are part of the same returning wall override pair.
+// Used to exempt them from distance validation rules.
+export function areReturningWallPair(wall1, wall2) {
+    if (state.returningWallOverrides.size === 0) return false;
+    return state.returningWallOverrides.has(wall1) && state.returningWallOverrides.has(wall2);
 }
 
 // Get which envelope(s) a wall belongs to on its floor
@@ -1288,8 +1609,19 @@ export function computeMergedWall(newWall, existingWall) {
 }
 // Check if a grid point falls inside any wall's parallel restriction zone
 // Returns the restricting wall info if found, null otherwise
-export function findRestrictingWallAtPoint(x, y, floorId) {
+// forInternalWall: if true, include internal wall restriction zones; if false, skip them
+export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = false) {
     for (const wall of state.walls) {
+        // For returning wall overrides, only exempt the specific endpoints
+        // (where new walls need to connect), not the entire restriction zone.
+        if (state.returningWallOverrides.has(wall)) {
+            const atEndpoint = isNearWallEndpoint(x, y, wall, 10);
+            if (atEndpoint) continue;
+        }
+
+        // Internal walls don't create restriction zones for external walls
+        if (!forInternalWall && isInternalWall(wall)) continue;
+
         const floorDiff = Math.abs(wall.floorId - floorId);
         if (floorDiff > 1) continue;
 
@@ -1308,10 +1640,12 @@ export function findRestrictingWallAtPoint(x, y, floorId) {
     return null;
 }
 
-// Nudge a grid point out of restriction zones to the nearest valid grid position
-// Returns adjusted {x, y} snapped to GRID_SIZE_EXTERNAL
-export function nudgeStartPointOutOfZones(x, y, floorId) {
-    const restriction = findRestrictingWallAtPoint(x, y, floorId);
+// Nudge a grid point out of restriction zones to the nearest valid grid position.
+// gridSize defaults to GRID_SIZE_EXTERNAL (300mm); pass GRID_SIZE_INTERNAL (100mm)
+// for internal walls.
+export function nudgeStartPointOutOfZones(x, y, floorId, gridSize = GRID_SIZE_EXTERNAL) {
+    const forInternalWall = gridSize === GRID_SIZE_INTERNAL;
+    const restriction = findRestrictingWallAtPoint(x, y, floorId, forInternalWall);
     if (!restriction) return { x, y };
 
     const { isHorizontal, internalFace } = restriction;
@@ -1320,20 +1654,27 @@ export function nudgeStartPointOutOfZones(x, y, floorId) {
         const direction = y > internalFace ? 1 : -1;
         const targetY = internalFace + direction * MIN_DISTANCE_PARALLEL;
         const snappedY = direction > 0
-            ? Math.ceil(targetY / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL
-            : Math.floor(targetY / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL;
+            ? Math.ceil(targetY / gridSize) * gridSize
+            : Math.floor(targetY / gridSize) * gridSize;
         return { x, y: snappedY };
     } else {
         const direction = x > internalFace ? 1 : -1;
         const targetX = internalFace + direction * MIN_DISTANCE_PARALLEL;
         const snappedX = direction > 0
-            ? Math.ceil(targetX / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL
-            : Math.floor(targetX / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL;
+            ? Math.ceil(targetX / gridSize) * gridSize
+            : Math.floor(targetX / gridSize) * gridSize;
         return { x: snappedX, y };
     }
 }
 
 export function isWallInRestrictedZone(newWall) {
+    // Determine if the new wall is internal (both endpoints inside an envelope)
+    const newWallIsInternal = getEnvelopeContainingPoint(
+        (newWall.pointA.x + newWall.pointB.x) / 2,
+        (newWall.pointA.y + newWall.pointB.y) / 2,
+        newWall.floorId
+    ) !== null && !isWallInEnvelope(newWall);
+
     // Predictive slab system detection for preview walls
     // Use endpoint (cursor position) for more accurate prediction
     let predictedSlabSystem = null;
@@ -1344,6 +1685,9 @@ export function isWallInRestrictedZone(newWall) {
     for (let existingWall of state.walls) {
         const onSameFloor = newWall.floorId === existingWall.floorId;
         const onDifferentFloor = newWall.floorId !== existingWall.floorId;
+
+        // Internal walls don't create restriction zones for external walls
+        if (!newWallIsInternal && isInternalWall(existingWall)) continue;
 
         // Check if walls are perpendicular - no restriction
         if (existingWall.isPerpendicularTo(newWall)) {
@@ -1365,6 +1709,16 @@ export function isWallInRestrictedZone(newWall) {
             } else if (!previewIsInEnvelope && existingIsInEnvelope) {
                 continue;
             }
+        }
+
+        // For returning wall overrides, only exempt if the new wall connects
+        // at one of the returning wall's endpoints, not the entire zone.
+        if (state.returningWallOverrides.has(existingWall)) {
+            const newEndpoints = [newWall.pointA, newWall.pointB];
+            const connectsAtEndpoint = newEndpoints.some(ep =>
+                isNearWallEndpoint(ep.x, ep.y, existingWall, 10)
+            );
+            if (connectsAtEndpoint) continue;
         }
 
         // Check if parallel
@@ -1486,6 +1840,18 @@ export function validateWall(wall, wallIndex) {
 
         // SAME LEVEL RULES (Rule 1 & 3)
         if (onSameFloor) {
+            // Skip distance validation for returning wall pairs — they are
+            // intentionally close after the center-axis flip.
+            if (areReturningWallPair(wall, otherWall)) return;
+
+            // Internal walls don't create restriction zones for external walls
+            const wallIsInternal = isInternalWall(wall);
+            const otherIsInternal = isInternalWall(otherWall);
+            if (!wallIsInternal && otherIsInternal) return; // external wall, skip internal neighbor
+            if (wallIsInternal && !otherIsInternal) {
+                // Internal wall checked against external — restrictions apply (don't skip)
+            }
+
             // Check if walls are parallel
             if (wall.isParallelTo(otherWall)) {
                 const dist = wall.distanceToWall(otherWall);
