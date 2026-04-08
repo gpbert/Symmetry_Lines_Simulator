@@ -808,18 +808,47 @@ function buildZones() {
         });
     }
 
-    // Persistent restriction zones — all red
+    // Persistent restriction lines — red lines on restricted grid positions
+    // Mirrors the 2D drawRestrictedZones() approach
     const relevantWalls = state.walls.filter(w =>
         w.floorId === state.currentFloorId ||
         Math.abs(w.floorId - state.currentFloorId) === 1
     );
 
+    const gridStep = GRID_SIZE_EXTERNAL; // 300mm
+    const gridExtent = 150; // units (±15m), matches buildGrid()
+    const lineMat = new THREE.LineBasicMaterial({
+        color: 0xdc2626,
+        transparent: true,
+        opacity: 0.5,
+    });
+
     relevantWalls.forEach(wall => {
         const floorY = getFloorY(wall.floorId);
+        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+        // Internal face position (sim coords)
+        const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
 
-        // 600mm zone on both sides of internal face
-        buildZonePlane(wall, 0, -1, MIN_DISTANCE_PARALLEL, 0xdc2626, 0.06, floorY);
-        buildZonePlane(wall, 0, 1, MIN_DISTANCE_PARALLEL, 0xdc2626, 0.06, floorY);
+        const zoneStart = internalFace - MIN_DISTANCE_PARALLEL;
+        const zoneEnd = internalFace + MIN_DISTANCE_PARALLEL;
+
+        const firstGrid = Math.ceil(zoneStart / gridStep) * gridStep;
+        for (let g = firstGrid; g <= zoneEnd; g += gridStep) {
+            const dist = Math.abs(g - internalFace);
+            if (dist < 10) continue;                      // skip the wall's own line
+            if (dist >= MIN_DISTANCE_PARALLEL - 2) continue; // skip boundary — valid there
+
+            const gU = mmToUnits(g);
+            const lineY = floorY + 0.005;
+            const vertices = new Float32Array(isHorizontal
+                ? [-gridExtent, lineY, gU, gridExtent, lineY, gU]   // line along X at Z=gU
+                : [gU, lineY, -gridExtent, gU, lineY, gridExtent]); // line along Z at X=gU
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            const line = new THREE.Line(geo, lineMat.clone());
+            zoneGroup.add(line);
+        }
     });
 }
 

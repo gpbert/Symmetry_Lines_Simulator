@@ -272,22 +272,69 @@ export function snapToVoidGrid(value) {
     return Math.round(value / VOID_GRID) * VOID_GRID;
 }
 
-// Snap a wall length to the nearest lower multiple of WALL_LENGTH_GRID
-export function snapLengthToGrid(startPoint, endPoint) {
+// Check if a coordinate is on a restricted grid line along a given axis.
+// axis: 'x' checks vertical walls' restriction zones (for horizontal wall endpoints),
+//        'y' checks horizontal walls' restriction zones (for vertical wall endpoints).
+function isEndpointRestricted(coord, axis, floorId) {
+    for (const wall of state.walls) {
+        const floorDiff = Math.abs(wall.floorId - floorId);
+        if (floorDiff > 1) continue;
+
+        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+
+        // For a horizontal drawing wall, the endpoint moves along X,
+        // so we check vertical existing walls (whose restriction is on the X axis)
+        if (axis === 'x' && isHorizontal) continue;  // horizontal walls restrict Y, not X
+        if (axis === 'y' && !isHorizontal) continue;  // vertical walls restrict X, not Y
+
+        const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
+        const dist = Math.abs(coord - internalFace);
+
+        if (dist < 10) continue; // on the wall's own line — OK
+        if (dist >= MIN_DISTANCE_PARALLEL) continue; // outside zone — OK
+
+        return true; // inside restriction zone
+    }
+    return false;
+}
+
+// Snap a wall length to the nearest lower multiple of WALL_LENGTH_GRID,
+// skipping endpoint positions that land on restricted grid lines.
+export function snapLengthToGrid(startPoint, endPoint, floorId) {
     const dx = endPoint.x - startPoint.x;
     const dy = endPoint.y - startPoint.y;
 
     if (Math.abs(dx) > Math.abs(dy)) {
         const rawLength = Math.abs(dx);
-        const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
-        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
+        let snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
         const direction = dx > 0 ? 1 : -1;
+
+        // Shrink until endpoint is not on a restricted grid line
+        if (floorId !== undefined) {
+            while (snappedLength >= MIN_WALL_LENGTH) {
+                const endX = startPoint.x + direction * snappedLength;
+                if (!isEndpointRestricted(endX, 'x', floorId)) break;
+                snappedLength -= WALL_LENGTH_GRID;
+            }
+        }
+
+        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
         return { x: startPoint.x + direction * snappedLength, y: startPoint.y };
     } else {
         const rawLength = Math.abs(dy);
-        const snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
-        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
+        let snappedLength = Math.floor(rawLength / WALL_LENGTH_GRID) * WALL_LENGTH_GRID;
         const direction = dy > 0 ? 1 : -1;
+
+        // Shrink until endpoint is not on a restricted grid line
+        if (floorId !== undefined) {
+            while (snappedLength >= MIN_WALL_LENGTH) {
+                const endY = startPoint.y + direction * snappedLength;
+                if (!isEndpointRestricted(endY, 'y', floorId)) break;
+                snappedLength -= WALL_LENGTH_GRID;
+            }
+        }
+
+        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
         return { x: startPoint.x, y: startPoint.y + direction * snappedLength };
     }
 }

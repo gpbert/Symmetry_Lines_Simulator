@@ -131,7 +131,7 @@ function onMouseDown(e) {
                 finalPos = { x: drawingWall.x, y: pos.y };
             }
 
-            finalPos = sim.snapLengthToGrid(drawingWall, finalPos);
+            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId);
 
             const startX = wallFlipped ? finalPos.x : drawingWall.x;
             const startY = wallFlipped ? finalPos.y : drawingWall.y;
@@ -579,7 +579,7 @@ function onMouseMove(e) {
             constrained = { x: drawingWall.x, y: pos.y };
         }
 
-        tempPoint = sim.snapLengthToGrid(drawingWall, constrained);
+        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId);
 
         // Auto-flip logic:
         // 1. Same grid line: flip to match existing wall's orientation

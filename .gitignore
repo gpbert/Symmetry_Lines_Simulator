@@ -42,3 +42,5 @@ index_broken.html
 # Word temp files
 ~$*.docx
 
+node_modules/
+test-results/

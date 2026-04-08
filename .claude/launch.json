@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "30cm-grid-simulator",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["/Users/a.graham/Documents/Symmetry_Line_Simulator/serve.py"],
+      "port": 8000,
+      "autoPort": true
+    }
+  ]
+}
