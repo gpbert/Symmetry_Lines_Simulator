@@ -1016,7 +1016,7 @@ export function applyReturningWallOverrides() {
 
 // Check if a wall's internal face is on the 300mm external grid.
 // True internal walls (drawn on the 100mm grid) may have positions not divisible by 300.
-function isOnExternalGrid(wall) {
+export function isOnExternalGrid(wall) {
     const isH = Math.abs(wall.d.x) > Math.abs(wall.d.y);
     const facePos = isH ? Math.round(wall.pointA.y) : Math.round(wall.pointA.x);
     return Math.abs(facePos % GRID_SIZE_EXTERNAL) < 5;
