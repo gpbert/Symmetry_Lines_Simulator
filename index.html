@@ -878,8 +878,10 @@
             const sel = document.getElementById('wallThickness');
             if (hasEnvelope) {
                 opt.style.display = '';
+                opt.disabled = false;
             } else {
                 opt.style.display = 'none';
+                opt.disabled = true;
                 if (sel.value === '100') sel.value = '200';
             }
         }
