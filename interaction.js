@@ -405,24 +405,17 @@ function onMouseUp(e) {
     }
 
     if (stretchingWall) {
-        if (stretchingWall.length < MIN_WALL_LENGTH) {
-            stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
-            stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
-            stretchingWall.updateVectors();
-            showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
-        } else {
-            const stretchIdx = state.walls.indexOf(stretchingWall);
-            const violations = sim.validateWall(stretchingWall, stretchIdx);
-            if (violations.length > 0 && violations.some(v => v.type === 'error')) {
-                stretchingWall.pointA = { x: originalStretchPoint.ax, y: originalStretchPoint.ay };
-                stretchingWall.pointB = { x: originalStretchPoint.bx, y: originalStretchPoint.by };
-                stretchingWall.updateVectors();
-                showToast('Cannot stretch wall here. Placement would violate rules.', 'error');
-            } else {
-                sim.addToHistory();
-                updateBuildingEnvelopes();
-                state.selectedWalls = [];
-            }
+        const wasStretched = originalStretchPoint && (
+            stretchingWall.pointA.x !== originalStretchPoint.ax ||
+            stretchingWall.pointA.y !== originalStretchPoint.ay ||
+            stretchingWall.pointB.x !== originalStretchPoint.bx ||
+            stretchingWall.pointB.y !== originalStretchPoint.by
+        );
+
+        if (wasStretched) {
+            sim.addToHistory();
+            updateBuildingEnvelopes();
+            state.selectedWalls = [];
         }
 
         stretchingWall = null;
@@ -463,7 +456,7 @@ function onMouseUp(e) {
 
     if (isDragging) {
         const selectedWall = state.selectedWalls[0];
-        const wasMoved = selectedWall && (
+        const wasMoved = selectedWall && originalWallPos && (
             selectedWall.pointA.x !== originalWallPos.ax ||
             selectedWall.pointA.y !== originalWallPos.ay ||
             selectedWall.pointB.x !== originalWallPos.bx ||
@@ -472,14 +465,15 @@ function onMouseUp(e) {
 
         isDragging = false;
         canvas.style.cursor = 'pointer';
-        dragStartPos = null;
-        originalWallPos = null;
 
         if (wasMoved) {
+            sim.addToHistory();
             updateBuildingEnvelopes();
             state.selectedWalls = [];
         }
 
+        dragStartPos = null;
+        originalWallPos = null;
         validateAllWalls();
         r.draw();
     }
@@ -558,28 +552,37 @@ function onMouseMove(e) {
             ? { x: stretchingWall.pointB.x, y: stretchingWall.pointB.y }
             : { x: stretchingWall.pointA.x, y: stretchingWall.pointA.y };
 
-        const stretchDx = Math.abs(newPoint.x - otherPoint.x);
-        const stretchDy = Math.abs(newPoint.y - otherPoint.y);
-        const rawLength = Math.max(stretchDx, stretchDy);
-        const snappedLength = Math.floor(rawLength / stretchLengthGrid) * stretchLengthGrid;
+        // Use snapLengthToGrid to compute the endpoint — this automatically
+        // skips restricted grid lines, just like when drawing a new wall.
+        const snapped = sim.snapLengthToGrid(otherPoint, newPoint, state.currentFloorId, stretchLengthGrid);
 
-        if (snappedLength >= MIN_WALL_LENGTH) {
-            if (isHorizontal) {
-                const dir = newPoint.x > otherPoint.x ? 1 : -1;
-                newPoint.x = otherPoint.x + dir * snappedLength;
-            } else {
-                const dir = newPoint.y > otherPoint.y ? 1 : -1;
-                newPoint.y = otherPoint.y + dir * snappedLength;
-            }
+        // snapLengthToGrid returns the start point if length < MIN_WALL_LENGTH
+        if (snapped.x === otherPoint.x && snapped.y === otherPoint.y) {
+            // Would be too short — keep current position
+            r.draw();
+            return;
         }
+
+        // Also validate against other wall rules
+        const savedA = { ...stretchingWall.pointA };
+        const savedB = { ...stretchingWall.pointB };
 
         if (stretchingEndpoint === 'A') {
-            stretchingWall.pointA = newPoint;
+            stretchingWall.pointA = snapped;
         } else {
-            stretchingWall.pointB = newPoint;
+            stretchingWall.pointB = snapped;
+        }
+        stretchingWall.updateVectors();
+
+        const stretchIdx = state.walls.indexOf(stretchingWall);
+        const violations = sim.validateWall(stretchingWall, stretchIdx);
+        if (violations.some(v => v.type === 'error')) {
+            // Revert — keep previous valid position
+            stretchingWall.pointA = savedA;
+            stretchingWall.pointB = savedB;
+            stretchingWall.updateVectors();
         }
 
-        stretchingWall.updateVectors();
         r.draw();
         return;
     }
@@ -595,11 +598,25 @@ function onMouseMove(e) {
         const snappedOffsetY = sim.snapToGrid(offsetY, dragGrid);
 
         const selectedWall = state.selectedWalls[0];
+
+        // Test the new position — only apply if valid (skip invalid positions)
+        const savedA = { ...selectedWall.pointA };
+        const savedB = { ...selectedWall.pointB };
+
         selectedWall.pointA.x = originalWallPos.ax + snappedOffsetX;
         selectedWall.pointA.y = originalWallPos.ay + snappedOffsetY;
         selectedWall.pointB.x = originalWallPos.bx + snappedOffsetX;
         selectedWall.pointB.y = originalWallPos.by + snappedOffsetY;
         selectedWall.updateVectors();
+
+        const dragIdx = state.walls.indexOf(selectedWall);
+        const violations = sim.validateWall(selectedWall, dragIdx);
+        if (violations.some(v => v.type === 'error')) {
+            // Revert — keep previous valid position
+            selectedWall.pointA = savedA;
+            selectedWall.pointB = savedB;
+            selectedWall.updateVectors();
+        }
 
         r.draw();
         return;
