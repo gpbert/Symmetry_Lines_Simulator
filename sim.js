@@ -826,45 +826,41 @@ export function detectReturningWallPairs(envelope) {
         lanes.get(key).push(wall);
     });
 
-    // Check each lane with exactly 2 walls
+    // Check each lane — find walls whose external face points inward (returning walls)
     for (const [, laneWalls] of lanes) {
-        if (laneWalls.length !== 2) continue;
+        if (laneWalls.length < 2) continue;
 
-        const [w1, w2] = laneWalls;
-        if (!w1.sameOrientation(w2)) continue;
+        // For each wall in the lane, test if its external face points into the polygon.
+        // If so, it's a returning wall. We need at least one non-returning wall to pair with.
+        const returning = [];
+        const correct = [];
 
-        // Determine which wall faces outward by testing a point offset along
-        // each wall's normal. The wall whose offset point is OUTSIDE the
-        // envelope polygon is the returning wall.
-        const mid1 = {
-            x: (w1.pointA.x + w1.pointB.x) / 2,
-            y: (w1.pointA.y + w1.pointB.y) / 2
-        };
-        const test1 = {
-            x: mid1.x + w1.n.x * 1, // 1mm offset along normal (toward external face)
-            y: mid1.y + w1.n.y * 1
-        };
-
-        const mid2 = {
-            x: (w2.pointA.x + w2.pointB.x) / 2,
-            y: (w2.pointA.y + w2.pointB.y) / 2
-        };
-        const test2 = {
-            x: mid2.x + w2.n.x * 1,
-            y: mid2.y + w2.n.y * 1
-        };
-
-        const inside1 = pointInPolygon(test1, envelope.polygon);
-        const inside2 = pointInPolygon(test2, envelope.polygon);
-
-        // The wall whose external-face test point is INSIDE the polygon has its
-        // external face pointing inward — that's the returning wall that needs to flip.
-        if (inside1 && !inside2) {
-            pairs.push({ wallA: w1, wallB: w2, returningWall: w1 });
-        } else if (!inside1 && inside2) {
-            pairs.push({ wallA: w1, wallB: w2, returningWall: w2 });
+        for (const wall of laneWalls) {
+            const mid = {
+                x: (wall.pointA.x + wall.pointB.x) / 2,
+                y: (wall.pointA.y + wall.pointB.y) / 2
+            };
+            const testPt = {
+                x: mid.x + wall.n.x * 1, // 1mm offset along normal (toward external face)
+                y: mid.y + wall.n.y * 1
+            };
+            if (pointInPolygon(testPt, envelope.polygon)) {
+                returning.push(wall);
+            } else {
+                correct.push(wall);
+            }
         }
-        // If both inside or both outside, skip (ambiguous or not a returning pair)
+
+        // Pair each returning wall with the first correct wall for the override
+        if (returning.length > 0 && correct.length > 0) {
+            for (const retWall of returning) {
+                // Only pair walls that share the same orientation
+                const partner = correct.find(w => w.sameOrientation(retWall));
+                if (partner) {
+                    pairs.push({ wallA: partner, wallB: retWall, returningWall: retWall });
+                }
+            }
+        }
     }
 
     return pairs;
