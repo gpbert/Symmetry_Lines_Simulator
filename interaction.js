@@ -128,7 +128,14 @@ function onMouseDown(e) {
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
             const snappedY = sim.snapToGrid(pos.y, gridSize);
-            const nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
+            let nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
+            // If fully blocked, try nudging again from the new position
+            if (sim.isStartPointFullyBlocked(nudged.x, nudged.y, state.currentFloorId)) {
+                const reNudged = sim.nudgeStartPointOutOfZones(nudged.x, nudged.y, state.currentFloorId, gridSize);
+                if (!sim.isStartPointFullyBlocked(reNudged.x, reNudged.y, state.currentFloorId)) {
+                    nudged = reNudged;
+                }
+            }
             drawingWall = { x: nudged.x, y: nudged.y };
             tempPoint = { x: nudged.x, y: nudged.y };
         } else {
@@ -504,7 +511,15 @@ function onMouseMove(e) {
         const hoverGridSize = hoverEnvelope ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
         const snappedX = sim.snapToGrid(pos.x, hoverGridSize);
         const snappedY = sim.snapToGrid(pos.y, hoverGridSize);
-        const nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);
+        let nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);
+        // If the nudged point is fully blocked (no valid wall in any direction), nudge further
+        if (sim.isStartPointFullyBlocked(nudged.x, nudged.y, state.currentFloorId)) {
+            // Try nudging from the original point in the opposite direction
+            const reNudged = sim.nudgeStartPointOutOfZones(nudged.x, nudged.y, state.currentFloorId, hoverGridSize);
+            if (!sim.isStartPointFullyBlocked(reNudged.x, reNudged.y, state.currentFloorId)) {
+                nudged = reNudged;
+            }
+        }
         currentMousePos = { x: nudged.x, y: nudged.y };
     } else {
         currentMousePos = { x: pos.x, y: pos.y };

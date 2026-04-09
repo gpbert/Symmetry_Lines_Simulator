@@ -1668,6 +1668,29 @@ export function nudgeStartPointOutOfZones(x, y, floorId, gridSize = GRID_SIZE_EX
     return { x: currentX, y: currentY };
 }
 
+// Check if a start point is completely blocked — no valid wall can be placed in any
+// direction from this point. Tests a minimal wall in all 4 cardinal directions with
+// both orientations. Returns true if ALL would be restricted.
+export function isStartPointFullyBlocked(x, y, floorId, thickness = 200) {
+    const testLength = MIN_WALL_LENGTH;
+    const directions = [
+        { dx: testLength, dy: 0 },   // right
+        { dx: -testLength, dy: 0 },  // left
+        { dx: 0, dy: testLength },   // down
+        { dx: 0, dy: -testLength },  // up
+    ];
+
+    for (const { dx, dy } of directions) {
+        // Normal orientation
+        const wall1 = new Wall(x, y, x + dx, y + dy, thickness, 2700, null, floorId);
+        if (!isWallInRestrictedZone(wall1).restricted) return false;
+        // Flipped orientation
+        const wall2 = new Wall(x + dx, y + dy, x, y, thickness, 2700, null, floorId);
+        if (!isWallInRestrictedZone(wall2).restricted) return false;
+    }
+    return true; // all directions and orientations restricted
+}
+
 export function isWallInRestrictedZone(newWall) {
     // Determine if the new wall is internal (both endpoints inside an envelope)
     const newWallIsInternal = getEnvelopeContainingPoint(
