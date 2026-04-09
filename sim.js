@@ -300,7 +300,17 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false) {
         const dist = Math.abs(coord - internalFace);
 
         if (dist < 10) continue; // on the wall's own line — OK
-        if (dist >= MIN_DISTANCE_PARALLEL) continue; // outside zone — OK
+
+        // Envelope walls use 1200mm on their external face side
+        let minDist = MIN_DISTANCE_PARALLEL;
+        if (isWallInEnvelope(wall)) {
+            const normalDir = isHorizontal ? wall.n.y : wall.n.x;
+            const isOnNormalSide = (coord - internalFace) * normalDir > 0;
+            if (isOnNormalSide) {
+                minDist = MIN_DISTANCE_OPPOSITE;
+            }
+        }
+        if (dist >= minDist) continue; // outside zone — OK
 
         return true; // inside restriction zone
     }
@@ -1654,8 +1664,18 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
         // On the internal face line itself is OK (aligned walls are valid)
         if (dist < 10) continue;
 
-        if (dist < MIN_DISTANCE_PARALLEL) {
-            return { wall, isHorizontal, internalFace };
+        // Envelope walls use 1200mm on their external face side (outside the building)
+        let minDist = MIN_DISTANCE_PARALLEL;
+        if (isWallInEnvelope(wall)) {
+            const normalDir = isHorizontal ? wall.n.y : wall.n.x;
+            const isOnNormalSide = (coord - internalFace) * normalDir > 0;
+            if (isOnNormalSide) {
+                minDist = MIN_DISTANCE_OPPOSITE;
+            }
+        }
+
+        if (dist < minDist) {
+            return { wall, isHorizontal, internalFace, minDist };
         }
     }
     return null;
@@ -1673,17 +1693,17 @@ export function nudgeStartPointOutOfZones(x, y, floorId, gridSize = GRID_SIZE_EX
         const restriction = findRestrictingWallAtPoint(currentX, currentY, floorId, forInternalWall);
         if (!restriction) return { x: currentX, y: currentY };
 
-        const { isHorizontal, internalFace } = restriction;
+        const { isHorizontal, internalFace, minDist } = restriction;
 
         if (isHorizontal) {
             const direction = currentY > internalFace ? 1 : -1;
-            const targetY = internalFace + direction * MIN_DISTANCE_PARALLEL;
+            const targetY = internalFace + direction * minDist;
             currentY = direction > 0
                 ? Math.ceil(targetY / gridSize) * gridSize
                 : Math.floor(targetY / gridSize) * gridSize;
         } else {
             const direction = currentX > internalFace ? 1 : -1;
-            const targetX = internalFace + direction * MIN_DISTANCE_PARALLEL;
+            const targetX = internalFace + direction * minDist;
             currentX = direction > 0
                 ? Math.ceil(targetX / gridSize) * gridSize
                 : Math.floor(targetX / gridSize) * gridSize;
