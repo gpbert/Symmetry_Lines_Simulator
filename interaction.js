@@ -648,6 +648,9 @@ function onMouseMove(e) {
                         if (!flippedRestriction.restricted) {
                             wallFlipped = true;
                         }
+                    } else {
+                        // No restriction — reset flip to default
+                        wallFlipped = false;
                     }
                 }
             }
