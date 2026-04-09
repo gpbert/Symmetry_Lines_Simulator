@@ -902,6 +902,26 @@ function applyReturningPairOverride(otherWall, returningWall) {
 
     returningWall.thickness = Math.max(300, returningWall.thickness);
     flipWallAroundCenter(returningWall);
+
+    // Propagate 30cm thickness to all aligned walls on the same grid line,
+    // so we don't create "Aligned walls must share thickness" violations.
+    [otherWall, returningWall].forEach(w => {
+        const aligned = findAllAlignedWalls(w);
+        aligned.forEach(({ wall: alignedWall }) => {
+            if (alignedWall !== w && alignedWall.thickness < 300) {
+                if (!state.returningWallOverrides.has(alignedWall)) {
+                    state.returningWallOverrides.set(alignedWall, {
+                        originalPointA: { ...alignedWall.pointA },
+                        originalPointB: { ...alignedWall.pointB },
+                        originalThickness: alignedWall.thickness,
+                        wasFlipped: false
+                    });
+                }
+                alignedWall.thickness = 300;
+                alignedWall.updateVectors();
+            }
+        });
+    });
 }
 
 // Check if two walls are transitively connected via shared endpoints.
