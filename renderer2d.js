@@ -118,12 +118,14 @@ function drawGrid() {
 
 function drawRestrictedZones(skipIndices = new Set()) {
     if (!state.showRestrictionLines) return;
-    const relevantWalls = state.walls.filter((w, idx) =>
-        !skipIndices.has(idx) && (
-            w.floorId === state.currentFloorId ||
-            Math.abs(w.floorId - state.currentFloorId) === 1
-        )
-    );
+    const relevantWalls = state.walls.filter((w, idx) => {
+        if (skipIndices.has(idx)) return false;
+        if (w.floorId === state.currentFloorId) return true;
+        // Adjacent floor walls — only include if the corresponding "Show Levels" is enabled
+        if (w.floorId === state.currentFloorId - 1 && state.showLevelsBelow) return true;
+        if (w.floorId === state.currentFloorId + 1 && state.showLevelsAbove) return true;
+        return false;
+    });
 
     // Compute visible world bounds in mm for clamping infinite zone edges
     const visibleLeft = (-panOffset.x) / zoomLevel;
@@ -141,9 +143,14 @@ function drawRestrictedZones(skipIndices = new Set()) {
     relevantWalls.forEach(wall => {
         const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
         const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
+        const isAdjacentFloor = wall.floorId !== state.currentFloorId;
 
-        ctx.strokeStyle = 'rgba(220, 38, 38, 0.5)';
-        ctx.lineWidth = 4 / zoomLevel;
+        ctx.strokeStyle = isAdjacentFloor
+            ? 'rgba(220, 38, 38, 0.25)'  // lighter for adjacent floor restrictions
+            : 'rgba(220, 38, 38, 0.5)';
+        ctx.lineWidth = isAdjacentFloor
+            ? 2 / zoomLevel
+            : 4 / zoomLevel;
 
         // Find grid lines within the 600mm restriction zone on both sides
         const zoneStart = internalFace - MIN_DISTANCE_PARALLEL;
