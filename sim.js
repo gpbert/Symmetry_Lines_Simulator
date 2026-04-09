@@ -961,15 +961,16 @@ function detectLaneBasedReturningPairs() {
     for (let i = 0; i < state.walls.length; i++) {
         if (processed.has(i)) continue;
         const w1 = state.walls[i];
-        // Returning wall rule only applies to external walls
-        if (isInternalWall(w1)) continue;
+        // Returning wall rule only applies to walls on the 300mm external grid.
+        // Walls on non-300mm positions are true internal walls drawn on the 100mm grid.
+        if (!isOnExternalGrid(w1)) continue;
         const isH1 = Math.abs(w1.d.x) > Math.abs(w1.d.y);
         const gridPos1 = isH1 ? Math.round(w1.pointA.y) : Math.round(w1.pointA.x);
 
         for (let j = i + 1; j < state.walls.length; j++) {
             if (processed.has(j)) continue;
             const w2 = state.walls[j];
-            if (isInternalWall(w2)) continue;
+            if (!isOnExternalGrid(w2)) continue;
             if (w2.floorId !== w1.floorId) continue;
             if (!w1.isParallelTo(w2)) continue;
 
@@ -993,31 +994,27 @@ function detectLaneBasedReturningPairs() {
 }
 
 // Detect and apply returning wall overrides.
-// Uses envelope-based detection when envelopes exist, falls back to lane-based
-// detection for pairs not yet in a closed envelope.
+// Only uses envelope-based detection (polygon winding) which reliably determines
+// which wall faces outward. Lane-based detection was removed because without a
+// closed envelope polygon, we cannot distinguish true returning pairs from
+// step/L-junction configurations.
 export function applyReturningWallOverrides() {
-    const envelopeProcessed = new Set(); // wall indices already handled by envelope detection
-
-    // 1. Envelope-based detection (authoritative — uses polygon winding)
     for (const envelope of state.buildingEnvelopes) {
         const pairs = detectReturningWallPairs(envelope);
 
         for (const { wallA, wallB, returningWall } of pairs) {
             const otherWall = wallA === returningWall ? wallB : wallA;
             applyReturningPairOverride(otherWall, returningWall);
-            envelopeProcessed.add(state.walls.indexOf(wallA));
-            envelopeProcessed.add(state.walls.indexOf(wallB));
         }
     }
+}
 
-    // 2. Lane-based detection (for pairs not yet in a closed envelope)
-    const lanePairs = detectLaneBasedReturningPairs();
-    for (const { otherWall, returningWall } of lanePairs) {
-        const idx1 = state.walls.indexOf(otherWall);
-        const idx2 = state.walls.indexOf(returningWall);
-        if (envelopeProcessed.has(idx1) || envelopeProcessed.has(idx2)) continue;
-        applyReturningPairOverride(otherWall, returningWall);
-    }
+// Check if a wall's internal face is on the 300mm external grid.
+// True internal walls (drawn on the 100mm grid) may have positions not divisible by 300.
+function isOnExternalGrid(wall) {
+    const isH = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+    const facePos = isH ? Math.round(wall.pointA.y) : Math.round(wall.pointA.x);
+    return Math.abs(facePos % GRID_SIZE_EXTERNAL) < 5;
 }
 
 // Check if a point is near any endpoint of a wall (pointA, pointB, or their external equivalents).
@@ -1645,26 +1642,30 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
 // for internal walls.
 export function nudgeStartPointOutOfZones(x, y, floorId, gridSize = GRID_SIZE_EXTERNAL) {
     const forInternalWall = gridSize === GRID_SIZE_INTERNAL;
-    const restriction = findRestrictingWallAtPoint(x, y, floorId, forInternalWall);
-    if (!restriction) return { x, y };
+    // Loop to handle cascading restrictions (nudging away from one wall
+    // might land in another wall's zone). Limit iterations to prevent infinite loops.
+    let currentX = x, currentY = y;
+    for (let i = 0; i < 5; i++) {
+        const restriction = findRestrictingWallAtPoint(currentX, currentY, floorId, forInternalWall);
+        if (!restriction) return { x: currentX, y: currentY };
 
-    const { isHorizontal, internalFace } = restriction;
+        const { isHorizontal, internalFace } = restriction;
 
-    if (isHorizontal) {
-        const direction = y > internalFace ? 1 : -1;
-        const targetY = internalFace + direction * MIN_DISTANCE_PARALLEL;
-        const snappedY = direction > 0
-            ? Math.ceil(targetY / gridSize) * gridSize
-            : Math.floor(targetY / gridSize) * gridSize;
-        return { x, y: snappedY };
-    } else {
-        const direction = x > internalFace ? 1 : -1;
-        const targetX = internalFace + direction * MIN_DISTANCE_PARALLEL;
-        const snappedX = direction > 0
-            ? Math.ceil(targetX / gridSize) * gridSize
-            : Math.floor(targetX / gridSize) * gridSize;
-        return { x: snappedX, y };
+        if (isHorizontal) {
+            const direction = currentY > internalFace ? 1 : -1;
+            const targetY = internalFace + direction * MIN_DISTANCE_PARALLEL;
+            currentY = direction > 0
+                ? Math.ceil(targetY / gridSize) * gridSize
+                : Math.floor(targetY / gridSize) * gridSize;
+        } else {
+            const direction = currentX > internalFace ? 1 : -1;
+            const targetX = internalFace + direction * MIN_DISTANCE_PARALLEL;
+            currentX = direction > 0
+                ? Math.ceil(targetX / gridSize) * gridSize
+                : Math.floor(targetX / gridSize) * gridSize;
+        }
     }
+    return { x: currentX, y: currentY };
 }
 
 export function isWallInRestrictedZone(newWall) {
