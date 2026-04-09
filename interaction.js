@@ -603,10 +603,26 @@ function onMouseMove(e) {
         const savedA = { ...selectedWall.pointA };
         const savedB = { ...selectedWall.pointB };
 
-        selectedWall.pointA.x = originalWallPos.ax + snappedOffsetX;
-        selectedWall.pointA.y = originalWallPos.ay + snappedOffsetY;
-        selectedWall.pointB.x = originalWallPos.bx + snappedOffsetX;
-        selectedWall.pointB.y = originalWallPos.by + snappedOffsetY;
+        const newAx = originalWallPos.ax + snappedOffsetX;
+        const newAy = originalWallPos.ay + snappedOffsetY;
+        const newBx = originalWallPos.bx + snappedOffsetX;
+        const newBy = originalWallPos.by + snappedOffsetY;
+
+        // Check if either endpoint would land in a restriction zone
+        const forInternal = dragWallIsInternal;
+        const endpointARestricted = sim.findRestrictingWallAtPoint(newAx, newAy, selectedWall.floorId, forInternal);
+        const endpointBRestricted = sim.findRestrictingWallAtPoint(newBx, newBy, selectedWall.floorId, forInternal);
+
+        if (endpointARestricted || endpointBRestricted) {
+            // Skip — endpoints would land on restricted positions
+            r.draw();
+            return;
+        }
+
+        selectedWall.pointA.x = newAx;
+        selectedWall.pointA.y = newAy;
+        selectedWall.pointB.x = newBx;
+        selectedWall.pointB.y = newBy;
         selectedWall.updateVectors();
 
         const dragIdx = state.walls.indexOf(selectedWall);
