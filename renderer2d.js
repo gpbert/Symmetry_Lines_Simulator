@@ -139,6 +139,9 @@ function drawRestrictedZones(skipIndices = new Set()) {
     const gridStep = GRID_SIZE_EXTERNAL;
 
     relevantWalls.forEach(wall => {
+        // Non-structural walls don't generate restriction zones
+        if (sim.isInternalWall(wall)) return;
+
         const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
         const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
 
@@ -169,7 +172,7 @@ function drawRestrictedZones(skipIndices = new Set()) {
     });
 }
 
-function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, overrideColor = null, ext = null) {
+function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, overrideColor = null, ext = null, isNonStructural = false) {
     const hasViolation = violations.length > 0;
 
     // Compute effective endpoints using corner extensions (rendering-only)
@@ -189,6 +192,9 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     if (overrideColor) {
         ctx.fillStyle = overrideColor.replace(')', ', 0.15)').replace('rgb', 'rgba');
         ctx.strokeStyle = overrideColor;
+    } else if (isNonStructural && !hasViolation) {
+        ctx.fillStyle = isSelected ? 'rgba(37, 99, 235, 0.15)' : 'rgba(156, 163, 175, 0.15)';
+        ctx.strokeStyle = isSelected ? '#2563eb' : '#9ca3af';
     } else {
         ctx.fillStyle = hasViolation ? 'rgba(220, 38, 38, 0.2)' :
                        isSelected ? 'rgba(37, 99, 235, 0.3)' : 'rgba(107, 114, 128, 0.3)';
@@ -232,7 +238,11 @@ function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, over
     ctx.lineTo(mmToPx(externalB.x), mmToPx(externalB.y));
     ctx.stroke();
 
-    // Draw steel columns (use extended column positions if available)
+    // Draw steel columns (skip for non-structural walls)
+    if (isNonStructural) {
+        ctx.globalAlpha = 1.0;
+        return; // Non-structural walls: no columns, no dimensions
+    }
     const colABase = ext?.colA || effectiveA;
     const colBBase = ext?.colB || effectiveB;
 
@@ -601,7 +611,8 @@ function draw() {
                 );
             }
             const overrideColor = hasThicknessOverride ? '#2563eb' : null;
-            drawWall(renderWall, isSelected, violations, 1.0, overrideColor, extensions.get(idx));
+            const nonStructural = sim.isInternalWall(wall);
+            drawWall(renderWall, isSelected, violations, 1.0, overrideColor, extensions.get(idx), nonStructural);
         }
     });
 

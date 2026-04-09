@@ -82,7 +82,7 @@ test.describe('Internal Walls', () => {
         expect(result.wall5Internal).toBe(false);  // outside, not internal
     });
 
-    test('unit: internal walls do NOT restrict external walls', async ({ page }) => {
+    test('unit: non-structural walls have NO restriction zones at all', async ({ page }) => {
         const result = await page.evaluate(() => {
             const sim = window.__sim;
             const Wall = sim.Wall;
@@ -97,17 +97,14 @@ test.describe('Internal Walls', () => {
             sim.state.walls.push(new Wall(6000, 6000, 600, 6000, 200, 2700, null, 0));
             sim.state.walls.push(new Wall(600, 6000, 600, 600, 200, 2700, null, 0));
 
-            // Internal wall at Y=1800
-            sim.state.walls.push(new Wall(1200, 1800, 5400, 1800, 200, 2700, null, 0));
+            // Non-structural wall at Y=3000
+            sim.state.walls.push(new Wall(1200, 3000, 5400, 3000, 200, 2700, null, 0));
 
             sim.updateBuildingEnvelopes();
 
-            // Check: the internal wall's restriction zone should NOT affect external wall detection
-            // A point at Y=1500 (within 600mm of internal wall at Y=1800) should NOT be restricted
-            // for external walls
-            const restrictionForExternal = sim.findRestrictingWallAtPoint(3000, 1500, 0, false);
-            // But should be restricted for internal walls
-            const restrictionForInternal = sim.findRestrictingWallAtPoint(3000, 1500, 0, true);
+            // Non-structural walls don't restrict anything
+            const restrictionForExternal = sim.findRestrictingWallAtPoint(3000, 2700, 0, false);
+            const restrictionForInternal = sim.findRestrictingWallAtPoint(3000, 2700, 0, true);
 
             return {
                 externalRestricted: restrictionForExternal !== null,
@@ -115,11 +112,11 @@ test.describe('Internal Walls', () => {
             };
         });
 
-        expect(result.externalRestricted).toBe(false); // internal wall doesn't restrict external
-        expect(result.internalRestricted).toBe(true);   // internal wall restricts other internal
+        expect(result.externalRestricted).toBe(false);
+        expect(result.internalRestricted).toBe(false); // non-structural = no restrictions
     });
 
-    test('unit: internal walls ARE restricted by external walls', async ({ page }) => {
+    test('unit: non-structural walls are NOT restricted by external walls', async ({ page }) => {
         const result = await page.evaluate(() => {
             const sim = window.__sim;
             const Wall = sim.Wall;
@@ -128,7 +125,6 @@ test.describe('Internal Walls', () => {
             sim.state.buildingEnvelopes = [];
             sim.state.returningWallOverrides.clear();
 
-            // Build envelope with top wall at Y=600
             sim.state.walls.push(new Wall(600, 600, 6000, 600, 200, 2700, null, 0));
             sim.state.walls.push(new Wall(6000, 600, 6000, 6000, 200, 2700, null, 0));
             sim.state.walls.push(new Wall(6000, 6000, 600, 6000, 200, 2700, null, 0));
@@ -136,8 +132,7 @@ test.describe('Internal Walls', () => {
 
             sim.updateBuildingEnvelopes();
 
-            // Check: a point at Y=800 (within 600mm of external wall at Y=600)
-            // should be restricted for internal walls
+            // Non-structural walls are freely placed — not restricted by any walls
             const restrictionForInternal = sim.findRestrictingWallAtPoint(3000, 800, 0, true);
 
             return {
@@ -145,7 +140,7 @@ test.describe('Internal Walls', () => {
             };
         });
 
-        expect(result.internalRestrictedByExternal).toBe(true);
+        expect(result.internalRestrictedByExternal).toBe(false);
     });
 
     test('unit: returning wall rule skips internal walls', async ({ page }) => {

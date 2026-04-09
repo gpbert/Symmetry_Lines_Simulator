@@ -650,7 +650,8 @@
             <div class="property-group">
                 <label for="wallThickness">Thickness (cm)</label>
                 <select id="wallThickness">
-                    <option value="200">20 cm</option>
+                    <option value="100" id="thickness10cm" style="display:none" disabled>10 cm</option>
+                    <option value="200" selected>20 cm</option>
                     <option value="300">30 cm</option>
                 </select>
             </div>
@@ -867,6 +868,20 @@
                     showToast(`Waffle Slab${removed > 1 ? 's' : ''} removed`, 'info', 2000);
                 }
             });
+            update10cmOption();
+        }
+
+        // Show/hide 10cm thickness option based on envelope presence on current floor
+        function update10cmOption() {
+            const hasEnvelope = state.buildingEnvelopes.some(e => e.floorId === state.currentFloorId);
+            const opt = document.getElementById('thickness10cm');
+            const sel = document.getElementById('wallThickness');
+            if (hasEnvelope) {
+                opt.style.display = '';
+            } else {
+                opt.style.display = 'none';
+                if (sel.value === '100') sel.value = '200';
+            }
         }
 
         // Wrapper for validateAllWalls that also triggers draw
@@ -1202,6 +1217,7 @@
         document.getElementById('currentFloor').addEventListener('change', (e) => {
             state.currentFloorId = parseInt(e.target.value);
             state.selectedWalls = [];
+            update10cmOption();
             activeRenderer.draw();
             validateAllWalls();
         });
@@ -1358,15 +1374,17 @@
                 </div>
 
                 <div class="rule-section">
-                    <h3>9. Internal Walls</h3>
+                    <h3>9. Non-Structural (Interior) Walls</h3>
                     <ul>
-                        <li><strong>Detection:</strong> Automatically detected when drawing starts inside a closed building envelope</li>
-                        <li><strong>Grid:</strong> Internal walls snap to the 10 cm grid (vs 30 cm for external walls)</li>
-                        <li><strong>Length Grid:</strong> Wall length snaps to 10 cm increments</li>
-                        <li><strong>Minimum Length:</strong> 40 cm (same as external walls)</li>
-                        <li><strong>Boundary:</strong> Internal walls must stay within the envelope</li>
-                        <li><strong>Restriction Zones:</strong> External wall restriction zones apply to internal walls; internal walls create restriction zones for other internal walls only</li>
-                        <li><strong>Exempt From:</strong> Returning wall rule, envelope angle constraints</li>
+                        <li><strong>Detection:</strong> Automatically classified when both endpoints are inside a closed building envelope</li>
+                        <li><strong>Appearance:</strong> Lighter fill, no steel columns at endpoints</li>
+                        <li><strong>Grid:</strong> Snap to the 10 cm grid (vs 30 cm for structural walls)</li>
+                        <li><strong>Minimum Length:</strong> 20 cm (vs 40 cm for structural walls)</li>
+                        <li><strong>Thickness:</strong> 10 cm, 20 cm, or 30 cm (10 cm only available inside envelope)</li>
+                        <li><strong>Free Placement:</strong> No restriction zones — can be placed anywhere on the 10 cm grid within the envelope</li>
+                        <li><strong>Boundary:</strong> Must stay within the envelope</li>
+                        <li><strong>Reversion:</strong> If envelope breaks, reverts to structural — shown in red if off the 30 cm grid or has 10 cm thickness</li>
+                        <li><strong>Exempt From:</strong> Returning wall rule, envelope angle constraints, all restriction zones</li>
                     </ul>
                 </div>
 

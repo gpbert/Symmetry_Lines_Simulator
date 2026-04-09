@@ -429,6 +429,9 @@ function buildWallMesh(wall, group, material, idx, wallViolations, ext) {
 
     group.add(mesh);
 
+    // Skip columns for non-structural walls
+    if (sim.isInternalWall(wall)) return;
+
     // Steel columns at endpoints
     // Extended columns: col is the final center position (no offsets needed)
     // Non-extended columns: offset by dNorm*COLUMN_SIZE/2 + n*COLUMN_SIZE/2

@@ -6,7 +6,8 @@
 export const GRID_SIZE_EXTERNAL = 300; // mm - 300mm grid external
 export const GRID_SIZE_INTERNAL = 100; // mm - 100mm internal
 export const COLUMN_SIZE = 100; // mm - 10x10cm steel column
-export const MIN_WALL_LENGTH = 400; // mm - manufacturable minimum
+export const MIN_WALL_LENGTH = 400; // mm - structural minimum
+export const MIN_WALL_LENGTH_NON_STRUCTURAL = 200; // mm - non-structural minimum
 export const WALL_LENGTH_GRID = 300; // mm - wall lengths snap to 300mm grid (first valid snap is 600mm since 300 < 400)
 export const MIN_DISTANCE_PARALLEL = 600; // mm
 export const MIN_DISTANCE_OPPOSITE = 1200; // mm
@@ -278,9 +279,12 @@ export function snapToVoidGrid(value) {
 // axis: 'x' checks vertical walls' restriction zones (for horizontal wall endpoints),
 //        'y' checks horizontal walls' restriction zones (for vertical wall endpoints).
 function isEndpointRestricted(coord, axis, floorId, forInternalWall = false) {
+    // Non-structural walls have no endpoint restrictions
+    if (forInternalWall) return false;
+
     for (const wall of state.walls) {
-        // Internal walls don't restrict external wall endpoints
-        if (!forInternalWall && isInternalWall(wall)) continue;
+        // Non-structural walls don't create restriction zones
+        if (isInternalWall(wall)) continue;
 
         const floorDiff = Math.abs(wall.floorId - floorId);
         if (floorDiff > 1) continue;
@@ -309,6 +313,7 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false) {
 // pass GRID_SIZE_INTERNAL (100mm) for internal walls.
 export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WALL_LENGTH_GRID) {
     const forInternalWall = lengthGrid === GRID_SIZE_INTERNAL;
+    const minLen = forInternalWall ? MIN_WALL_LENGTH_NON_STRUCTURAL : MIN_WALL_LENGTH;
     const dx = endPoint.x - startPoint.x;
     const dy = endPoint.y - startPoint.y;
 
@@ -317,32 +322,32 @@ export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WAL
         let snappedLength = Math.floor(rawLength / lengthGrid) * lengthGrid;
         const direction = dx > 0 ? 1 : -1;
 
-        // Shrink until endpoint is not on a restricted grid line
-        if (floorId !== undefined) {
-            while (snappedLength >= MIN_WALL_LENGTH) {
+        // Shrink until endpoint is not on a restricted grid line (structural walls only)
+        if (floorId !== undefined && !forInternalWall) {
+            while (snappedLength >= minLen) {
                 const endX = startPoint.x + direction * snappedLength;
                 if (!isEndpointRestricted(endX, 'x', floorId, forInternalWall)) break;
                 snappedLength -= lengthGrid;
             }
         }
 
-        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
+        if (snappedLength < minLen) return { x: startPoint.x, y: startPoint.y };
         return { x: startPoint.x + direction * snappedLength, y: startPoint.y };
     } else {
         const rawLength = Math.abs(dy);
         let snappedLength = Math.floor(rawLength / lengthGrid) * lengthGrid;
         const direction = dy > 0 ? 1 : -1;
 
-        // Shrink until endpoint is not on a restricted grid line
-        if (floorId !== undefined) {
-            while (snappedLength >= MIN_WALL_LENGTH) {
+        // Shrink until endpoint is not on a restricted grid line (structural walls only)
+        if (floorId !== undefined && !forInternalWall) {
+            while (snappedLength >= minLen) {
                 const endY = startPoint.y + direction * snappedLength;
                 if (!isEndpointRestricted(endY, 'y', floorId, forInternalWall)) break;
                 snappedLength -= lengthGrid;
             }
         }
 
-        if (snappedLength < MIN_WALL_LENGTH) return { x: startPoint.x, y: startPoint.y };
+        if (snappedLength < minLen) return { x: startPoint.x, y: startPoint.y };
         return { x: startPoint.x, y: startPoint.y + direction * snappedLength };
     }
 }
@@ -1608,6 +1613,9 @@ export function computeMergedWall(newWall, existingWall) {
 // Returns the restricting wall info if found, null otherwise
 // forInternalWall: if true, include internal wall restriction zones; if false, skip them
 export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = false) {
+    // Non-structural walls are freely placed — no restriction zones apply
+    if (forInternalWall) return null;
+
     for (const wall of state.walls) {
         // For returning wall overrides, only exempt the specific endpoints
         // (where new walls need to connect), not the entire restriction zone.
@@ -1616,8 +1624,8 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
             if (atEndpoint) continue;
         }
 
-        // Internal walls don't create restriction zones for external walls
-        if (!forInternalWall && isInternalWall(wall)) continue;
+        // Non-structural walls don't create restriction zones
+        if (isInternalWall(wall)) continue;
 
         const floorDiff = Math.abs(wall.floorId - floorId);
         if (floorDiff > 1) continue;
@@ -1692,12 +1700,13 @@ export function isStartPointFullyBlocked(x, y, floorId, thickness = 200) {
 }
 
 export function isWallInRestrictedZone(newWall) {
-    // Determine if the new wall is internal (both endpoints inside an envelope)
+    // Non-structural walls are freely placed — no restriction zones apply
     const newWallIsInternal = getEnvelopeContainingPoint(
         (newWall.pointA.x + newWall.pointB.x) / 2,
         (newWall.pointA.y + newWall.pointB.y) / 2,
         newWall.floorId
     ) !== null && !isWallInEnvelope(newWall);
+    if (newWallIsInternal) return { restricted: false };
 
     // Predictive slab system detection for preview walls
     // Use endpoint (cursor position) for more accurate prediction
@@ -1813,13 +1822,37 @@ export function isWallInRestrictedZone(newWall) {
 
 export function validateWall(wall, wallIndex) {
     const violations = [];
+    const wallIsNonStructural = isInternalWall(wall);
 
-    // Check length
-    if (wall.length < MIN_WALL_LENGTH) {
+    // Check length (different minimums for structural vs non-structural)
+    const minLen = wallIsNonStructural ? MIN_WALL_LENGTH_NON_STRUCTURAL : MIN_WALL_LENGTH;
+    if (wall.length < minLen) {
         violations.push({
             type: 'error',
-            message: `Wall is too short (${Math.round(wall.length / 10)}cm). Minimum: ${MIN_WALL_LENGTH / 10}cm`
+            message: `Wall is too short (${Math.round(wall.length / 10)}cm). Minimum: ${minLen / 10}cm`
         });
+    }
+
+    // Structural walls must be on the 300mm grid (position and length)
+    if (!wallIsNonStructural) {
+        if (!isOnExternalGrid(wall)) {
+            violations.push({
+                type: 'error',
+                message: 'Structural wall must be on the 30cm grid'
+            });
+        }
+        if (wall.length % GRID_SIZE_EXTERNAL >= 5) {
+            violations.push({
+                type: 'error',
+                message: 'Structural wall length must be a multiple of 30cm'
+            });
+        }
+        if (wall.thickness === 100) {
+            violations.push({
+                type: 'error',
+                message: 'Structural walls cannot be 10cm thick'
+            });
+        }
     }
 
     // Check against other walls
@@ -1868,13 +1901,8 @@ export function validateWall(wall, wallIndex) {
             // intentionally close after the center-axis flip.
             if (areReturningWallPair(wall, otherWall)) return;
 
-            // Internal walls don't create restriction zones for external walls
-            const wallIsInternal = isInternalWall(wall);
-            const otherIsInternal = isInternalWall(otherWall);
-            if (!wallIsInternal && otherIsInternal) return; // external wall, skip internal neighbor
-            if (wallIsInternal && !otherIsInternal) {
-                // Internal wall checked against external — restrictions apply (don't skip)
-            }
+            // Non-structural walls have no distance restrictions
+            if (isInternalWall(wall) || isInternalWall(otherWall)) return;
 
             // Check if walls are parallel
             if (wall.isParallelTo(otherWall)) {

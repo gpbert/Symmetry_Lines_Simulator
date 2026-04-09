@@ -128,12 +128,18 @@ function onMouseDown(e) {
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
             const snappedY = sim.snapToGrid(pos.y, gridSize);
-            let nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
-            // If fully blocked, try nudging again from the new position
-            if (sim.isStartPointFullyBlocked(nudged.x, nudged.y, state.currentFloorId)) {
-                const reNudged = sim.nudgeStartPointOutOfZones(nudged.x, nudged.y, state.currentFloorId, gridSize);
-                if (!sim.isStartPointFullyBlocked(reNudged.x, reNudged.y, state.currentFloorId)) {
-                    nudged = reNudged;
+            let nudged;
+            if (isDrawingInternalWall) {
+                // Non-structural: free placement, no nudging
+                nudged = { x: snappedX, y: snappedY };
+            } else {
+                nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
+                // If fully blocked, try nudging again from the new position
+                if (sim.isStartPointFullyBlocked(nudged.x, nudged.y, state.currentFloorId)) {
+                    const reNudged = sim.nudgeStartPointOutOfZones(nudged.x, nudged.y, state.currentFloorId, gridSize);
+                    if (!sim.isStartPointFullyBlocked(reNudged.x, reNudged.y, state.currentFloorId)) {
+                        nudged = reNudged;
+                    }
                 }
             }
             drawingWall = { x: nudged.x, y: nudged.y };
@@ -165,8 +171,9 @@ function onMouseDown(e) {
                 thickness, height, null, state.currentFloorId
             );
 
-            if (newWall.length < MIN_WALL_LENGTH) {
-                showToast(`Wall is too short. Minimum length is ${MIN_WALL_LENGTH / 10}cm`, 'error');
+            const minLen = isDrawingInternalWall ? sim.MIN_WALL_LENGTH_NON_STRUCTURAL : MIN_WALL_LENGTH;
+            if (newWall.length < minLen) {
+                showToast(`Wall is too short. Minimum length is ${minLen / 10}cm`, 'error');
                 drawingWall = null;
                 tempPoint = null;
                 clearDrawingToast();
@@ -511,9 +518,15 @@ function onMouseMove(e) {
         const hoverGridSize = hoverEnvelope ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
         const snappedX = sim.snapToGrid(pos.x, hoverGridSize);
         const snappedY = sim.snapToGrid(pos.y, hoverGridSize);
-        let nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);
+        let nudged;
+        if (hoverEnvelope) {
+            // Inside envelope: non-structural, free placement
+            nudged = { x: snappedX, y: snappedY };
+        } else {
+            nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);
+        }
         // If the nudged point is fully blocked (no valid wall in any direction), nudge further
-        if (sim.isStartPointFullyBlocked(nudged.x, nudged.y, state.currentFloorId)) {
+        if (!hoverEnvelope && sim.isStartPointFullyBlocked(nudged.x, nudged.y, state.currentFloorId)) {
             // Try nudging from the original point in the opposite direction
             const reNudged = sim.nudgeStartPointOutOfZones(nudged.x, nudged.y, state.currentFloorId, hoverGridSize);
             if (!sim.isStartPointFullyBlocked(reNudged.x, reNudged.y, state.currentFloorId)) {
