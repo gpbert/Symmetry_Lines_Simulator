@@ -97,17 +97,19 @@ test.describe('Internal Walls', () => {
             sim.state.walls.push(new Wall(6000, 6000, 600, 6000, 200, 2700, null, 0));
             sim.state.walls.push(new Wall(600, 6000, 600, 600, 200, 2700, null, 0));
 
-            // Internal wall at Y=1800
-            sim.state.walls.push(new Wall(1200, 1800, 5400, 1800, 200, 2700, null, 0));
+            // Internal wall at Y=3000 (far enough from envelope walls to avoid their zones)
+            sim.state.walls.push(new Wall(1200, 3000, 5400, 3000, 200, 2700, null, 0));
 
             sim.updateBuildingEnvelopes();
 
             // Check: the internal wall's restriction zone should NOT affect external wall detection
-            // A point at Y=1500 (within 600mm of internal wall at Y=1800) should NOT be restricted
-            // for external walls
-            const restrictionForExternal = sim.findRestrictingWallAtPoint(3000, 1500, 0, false);
+            // A point at Y=2700 (within 600mm of internal wall at Y=3000) should NOT be restricted
+            // for external walls, but IS restricted for internal walls.
+            // Y=2700 is 2100mm from top wall (Y=600) and 3300mm from bottom wall (Y=6000)
+            // — well outside both envelope walls' zones.
+            const restrictionForExternal = sim.findRestrictingWallAtPoint(3000, 2700, 0, false);
             // But should be restricted for internal walls
-            const restrictionForInternal = sim.findRestrictingWallAtPoint(3000, 1500, 0, true);
+            const restrictionForInternal = sim.findRestrictingWallAtPoint(3000, 2700, 0, true);
 
             return {
                 externalRestricted: restrictionForExternal !== null,

@@ -141,20 +141,27 @@ function drawRestrictedZones(skipIndices = new Set()) {
     relevantWalls.forEach(wall => {
         const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
         const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
+        const normalDir = isHorizontal ? wall.n.y : wall.n.x;
 
         ctx.strokeStyle = 'rgba(220, 38, 38, 0.5)';
         ctx.lineWidth = 4 / zoomLevel;
 
-        // Find grid lines within the 600mm restriction zone on both sides
-        const zoneStart = internalFace - MIN_DISTANCE_PARALLEL;
-        const zoneEnd = internalFace + MIN_DISTANCE_PARALLEL;
+        // Asymmetric restriction zone:
+        // - Normal side (where external face is): 1200mm (opposite-facing walls)
+        // - Other side: 600mm (same-orientation walls)
+        const zoneNeg = internalFace - (normalDir < 0 ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
+        const zonePos = internalFace + (normalDir > 0 ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
 
         // Iterate grid lines in the zone (skip boundary lines and the wall's own line)
-        const firstGrid = Math.ceil(zoneStart / gridStep) * gridStep;
-        for (let g = firstGrid; g <= zoneEnd; g += gridStep) {
+        const firstGrid = Math.ceil(zoneNeg / gridStep) * gridStep;
+        for (let g = firstGrid; g <= zonePos; g += gridStep) {
             const dist = Math.abs(g - internalFace);
             if (dist < 10) continue; // skip the wall's own line
-            if (dist >= MIN_DISTANCE_PARALLEL - 2) continue; // skip boundary — placement is valid there
+
+            // Determine the min distance for this grid position
+            const isOnNormalSide = (g - internalFace) * normalDir > 0;
+            const minDist = isOnNormalSide ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
+            if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
 
             ctx.beginPath();
             if (isHorizontal) {
