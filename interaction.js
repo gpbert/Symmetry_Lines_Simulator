@@ -24,6 +24,7 @@ let updateDrawingToastFn = null;
 let drawingWall = null;
 let tempPoint = null;
 let wallFlipped = false;
+let manualFlip = false; // true when user pressed Space to flip — prevents auto-flip override
 let isDrawingInternalWall = false;
 
 let drawingToastElement = null;
@@ -86,6 +87,7 @@ export function resetDrawingState() {
     drawingWall = null;
     tempPoint = null;
     wallFlipped = false;
+    manualFlip = false;
 
     drawingVoid = null;
     clearDrawingToast();
@@ -116,6 +118,7 @@ function onMouseDown(e) {
     if (state.currentMode === 'draw') {
         if (!drawingWall) {
             wallFlipped = false;
+            manualFlip = false;
 
             // Detect if click is inside a closed envelope → internal wall mode (100mm grid)
             const envelope = sim.getEnvelopeContainingPoint(pos.x, pos.y, state.currentFloorId);
@@ -235,6 +238,7 @@ function onMouseDown(e) {
             drawingWall = null;
             tempPoint = null;
             wallFlipped = false;
+            manualFlip = false;
             isDrawingInternalWall = false;
         
             clearDrawingToast();
@@ -653,10 +657,10 @@ function onMouseMove(e) {
         const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid);
 
-        // Auto-flip logic:
+        // Auto-flip logic (only when user hasn't manually flipped via Space):
         // 1. Same grid line: flip to match existing wall's orientation
         // 2. Different grid line + restricted: flip to resolve restriction
-        if (tempPoint) {
+        if (tempPoint && !manualFlip) {
             const thickness = parseInt(document.getElementById('wallThickness').value);
 
             const normalWall = new Wall(
@@ -750,6 +754,7 @@ function onKeyDown(e) {
             const restriction = sim.isWallInRestrictedZone(flippedWall);
             if (!restriction.restricted) {
                 wallFlipped = !wallFlipped;
+                manualFlip = true;
             }
             r.draw();
         } else if (state.selectedWalls.length > 0) {
@@ -773,6 +778,7 @@ function onKeyDown(e) {
         drawingWall = null;
         tempPoint = null;
         wallFlipped = false;
+        manualFlip = false;
         isDrawingInternalWall = false;
     
         clearDrawingToast();
