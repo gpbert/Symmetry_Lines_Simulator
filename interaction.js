@@ -605,9 +605,11 @@ function onMouseMove(e) {
             stretchingWall.pointB = snapped;
         }
 
+        const isOffGrid = !wallIsInternal && !sim.isOnExternalGrid(stretchingWall);
+
         // If structural wall is off-grid (reverted from non-structural), snap the
         // other endpoint to 300mm grid too so the wall becomes fully grid-aligned
-        if (!wallIsInternal && !sim.isOnExternalGrid(stretchingWall)) {
+        if (isOffGrid) {
             if (stretchingEndpoint === 'A') {
                 stretchingWall.pointB = {
                     x: sim.snapToGrid(stretchingWall.pointB.x, GRID_SIZE_EXTERNAL),
@@ -623,13 +625,15 @@ function onMouseMove(e) {
 
         stretchingWall.updateVectors();
 
-        const stretchIdx = state.walls.indexOf(stretchingWall);
-        const violations = sim.validateWall(stretchingWall, stretchIdx);
-        if (violations.some(v => v.type === 'error')) {
-            // Revert — keep previous valid position
-            stretchingWall.pointA = savedA;
-            stretchingWall.pointB = savedB;
-            stretchingWall.updateVectors();
+        // Skip validation for off-grid walls — they need to get to a valid position first
+        if (!isOffGrid) {
+            const stretchIdx = state.walls.indexOf(stretchingWall);
+            const violations = sim.validateWall(stretchingWall, stretchIdx);
+            if (violations.some(v => v.type === 'error')) {
+                stretchingWall.pointA = savedA;
+                stretchingWall.pointB = savedB;
+                stretchingWall.updateVectors();
+            }
         }
 
         r.draw();
@@ -640,6 +644,7 @@ function onMouseMove(e) {
     if (state.currentMode === 'select' && isDragging && state.selectedWalls.length === 1) {
         const selectedWall = state.selectedWalls[0];
         const dragWallIsInternal = sim.isInternalWall(selectedWall);
+        const isOffGrid = !dragWallIsInternal && !sim.isOnExternalGrid(selectedWall);
         const dragGrid = dragWallIsInternal ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
         const offsetX = pos.x - dragStartPos.x;
         const offsetY = pos.y - dragStartPos.y;
@@ -647,62 +652,67 @@ function onMouseMove(e) {
         const snappedOffsetX = sim.snapToGrid(offsetX, dragGrid);
         const snappedOffsetY = sim.snapToGrid(offsetY, dragGrid);
 
-        // Test the new position — only apply if valid (skip invalid positions)
         const savedA = { ...selectedWall.pointA };
         const savedB = { ...selectedWall.pointB };
 
-        let newAx = originalWallPos.ax + snappedOffsetX;
-        let newAy = originalWallPos.ay + snappedOffsetY;
-        let newBx = originalWallPos.bx + snappedOffsetX;
-        let newBy = originalWallPos.by + snappedOffsetY;
-
-        // If structural wall is off the 300mm grid (reverted from non-structural),
-        // snap ALL coordinates to the 300mm grid and round the length
-        if (!dragWallIsInternal && !sim.isOnExternalGrid(selectedWall)) {
+        if (isOffGrid) {
+            // Off-grid structural wall (reverted from non-structural):
+            // Snap directly to 300mm grid positions. Skip restriction checks
+            // since the wall needs to get to a valid position first.
             const isH = Math.abs(originalWallPos.bx - originalWallPos.ax) >
                         Math.abs(originalWallPos.by - originalWallPos.ay);
-            newAx = sim.snapToGrid(newAx, GRID_SIZE_EXTERNAL);
-            newAy = sim.snapToGrid(newAy, GRID_SIZE_EXTERNAL);
-            newBx = sim.snapToGrid(newBx, GRID_SIZE_EXTERNAL);
-            newBy = sim.snapToGrid(newBy, GRID_SIZE_EXTERNAL);
-            // Round length to 300mm grid
+            let newAx = sim.snapToGrid(originalWallPos.ax + snappedOffsetX, GRID_SIZE_EXTERNAL);
+            let newAy = sim.snapToGrid(originalWallPos.ay + snappedOffsetY, GRID_SIZE_EXTERNAL);
+            let newBx, newBy;
+            // Preserve wall direction, round length to nearest 300mm (min 600mm)
             if (isH) {
-                const len = Math.abs(newBx - newAx);
-                const snappedLen = Math.max(sim.MIN_WALL_LENGTH, Math.round(len / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL);
-                const dir = newBx > newAx ? 1 : -1;
+                newBy = newAy;
+                const rawLen = Math.abs(originalWallPos.bx - originalWallPos.ax);
+                const snappedLen = Math.max(MIN_WALL_LENGTH, Math.round(rawLen / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL);
+                const dir = originalWallPos.bx > originalWallPos.ax ? 1 : -1;
                 newBx = newAx + dir * snappedLen;
             } else {
-                const len = Math.abs(newBy - newAy);
-                const snappedLen = Math.max(sim.MIN_WALL_LENGTH, Math.round(len / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL);
-                const dir = newBy > newAy ? 1 : -1;
+                newBx = newAx;
+                const rawLen = Math.abs(originalWallPos.by - originalWallPos.ay);
+                const snappedLen = Math.max(MIN_WALL_LENGTH, Math.round(rawLen / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL);
+                const dir = originalWallPos.by > originalWallPos.ay ? 1 : -1;
                 newBy = newAy + dir * snappedLen;
             }
-        }
-
-        // Check if either endpoint would land in a restriction zone
-        const forInternal = dragWallIsInternal;
-        const endpointARestricted = sim.findRestrictingWallAtPoint(newAx, newAy, selectedWall.floorId, forInternal);
-        const endpointBRestricted = sim.findRestrictingWallAtPoint(newBx, newBy, selectedWall.floorId, forInternal);
-
-        if (endpointARestricted || endpointBRestricted) {
-            // Skip — endpoints would land on restricted positions
-            r.draw();
-            return;
-        }
-
-        selectedWall.pointA.x = newAx;
-        selectedWall.pointA.y = newAy;
-        selectedWall.pointB.x = newBx;
-        selectedWall.pointB.y = newBy;
-        selectedWall.updateVectors();
-
-        const dragIdx = state.walls.indexOf(selectedWall);
-        const violations = sim.validateWall(selectedWall, dragIdx);
-        if (violations.some(v => v.type === 'error')) {
-            // Revert — keep previous valid position
-            selectedWall.pointA = savedA;
-            selectedWall.pointB = savedB;
+            selectedWall.pointA.x = newAx;
+            selectedWall.pointA.y = newAy;
+            selectedWall.pointB.x = newBx;
+            selectedWall.pointB.y = newBy;
             selectedWall.updateVectors();
+        } else {
+            // Normal drag: apply offset with validation
+            let newAx = originalWallPos.ax + snappedOffsetX;
+            let newAy = originalWallPos.ay + snappedOffsetY;
+            let newBx = originalWallPos.bx + snappedOffsetX;
+            let newBy = originalWallPos.by + snappedOffsetY;
+
+            // Check if either endpoint would land in a restriction zone
+            const forInternal = dragWallIsInternal;
+            const endpointARestricted = sim.findRestrictingWallAtPoint(newAx, newAy, selectedWall.floorId, forInternal);
+            const endpointBRestricted = sim.findRestrictingWallAtPoint(newBx, newBy, selectedWall.floorId, forInternal);
+
+            if (endpointARestricted || endpointBRestricted) {
+                r.draw();
+                return;
+            }
+
+            selectedWall.pointA.x = newAx;
+            selectedWall.pointA.y = newAy;
+            selectedWall.pointB.x = newBx;
+            selectedWall.pointB.y = newBy;
+            selectedWall.updateVectors();
+
+            const dragIdx = state.walls.indexOf(selectedWall);
+            const violations = sim.validateWall(selectedWall, dragIdx);
+            if (violations.some(v => v.type === 'error')) {
+                selectedWall.pointA = savedA;
+                selectedWall.pointB = savedB;
+                selectedWall.updateVectors();
+            }
         }
 
         r.draw();
