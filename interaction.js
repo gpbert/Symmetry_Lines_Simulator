@@ -218,6 +218,16 @@ function onMouseDown(e) {
                     }
                 }
 
+                // Block placement if wall faces toward an envelope (must face away)
+                if (sim.shouldFlipAwayFromEnvelope(newWall)) {
+                    showToast('Wall must face away from the building envelope.', 'error');
+                    drawingWall = null;
+                    tempPoint = null;
+                    clearDrawingToast();
+                    r.draw();
+                    return;
+                }
+
                 const restriction = sim.isWallInRestrictedZone(newWall);
                 if (restriction.restricted) {
                     let message = 'Cannot place wall here.';
@@ -751,20 +761,29 @@ function onMouseMove(e) {
                     // Same grid line — flip to match existing wall's orientation
                     wallFlipped = !normalWall.sameOrientation(alignedWall);
                 } else {
-                    // Different grid line — check restrictions
-                    const restriction = sim.isWallInRestrictedZone(normalWall);
-                    if (restriction.restricted) {
-                        const flippedWall = new Wall(
-                            tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y,
-                            thickness, 2700, null, state.currentFloorId
-                        );
-                        const flippedRestriction = sim.isWallInRestrictedZone(flippedWall);
-                        if (!flippedRestriction.restricted) {
-                            wallFlipped = true;
-                        }
+                    // Check if wall should face away from envelope
+                    const currentWall = wallFlipped
+                        ? new Wall(tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y, thickness, 2700, null, state.currentFloorId)
+                        : normalWall;
+
+                    if (sim.shouldFlipAwayFromEnvelope(currentWall)) {
+                        wallFlipped = !wallFlipped;
                     } else {
-                        // No restriction — reset flip to default
-                        wallFlipped = false;
+                        // Different grid line — check restrictions
+                        const restriction = sim.isWallInRestrictedZone(normalWall);
+                        if (restriction.restricted) {
+                            const flippedWall = new Wall(
+                                tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y,
+                                thickness, 2700, null, state.currentFloorId
+                            );
+                            const flippedRestriction = sim.isWallInRestrictedZone(flippedWall);
+                            if (!flippedRestriction.restricted) {
+                                wallFlipped = true;
+                            }
+                        } else {
+                            // No restriction — reset flip to default
+                            wallFlipped = false;
+                        }
                     }
                 }
             }

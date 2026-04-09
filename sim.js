@@ -1715,6 +1715,39 @@ export function nudgeStartPointOutOfZones(x, y, floorId, gridSize = GRID_SIZE_EX
 // Check if a start point is completely blocked — no valid wall can be placed in any
 // direction from this point. Tests a minimal wall in all 4 cardinal directions with
 // both orientations. Returns true if ALL would be restricted.
+// Check if a wall should be flipped to face away from a nearby envelope wall.
+// Returns true if the wall is on the external face side of an envelope wall
+// and its normal points TOWARD the envelope (wrong — should face away).
+export function shouldFlipAwayFromEnvelope(wall) {
+    for (const envWall of state.walls) {
+        if (!isWallInEnvelope(envWall)) continue;
+        if (Math.abs(envWall.floorId - wall.floorId) > 1) continue;
+        if (!envWall.isParallelTo(wall)) continue;
+
+        const isH = Math.abs(envWall.d.x) > Math.abs(envWall.d.y);
+        const envFace = isH ? envWall.pointA.y : envWall.pointA.x;
+        const wallFace = isH ? wall.pointA.y : wall.pointA.x;
+        const dist = Math.abs(wallFace - envFace);
+
+        if (dist < 10) continue; // on the same grid line — handled by alignment
+        if (dist > MIN_DISTANCE_OPPOSITE + 10) continue; // too far
+
+        // Check if the new wall is on the external face side of the envelope wall
+        const envNormalDir = isH ? envWall.n.y : envWall.n.x;
+        const isOnExternalSide = (wallFace - envFace) * envNormalDir > 0;
+        if (!isOnExternalSide) continue;
+
+        // The new wall IS on the external side — its normal should point AWAY from envelope
+        // (i.e., same direction as the envelope wall's normal)
+        const wallNormalDir = isH ? wall.n.y : wall.n.x;
+        if (wallNormalDir * envNormalDir < 0) {
+            // Wall's normal points toward the envelope — needs to flip
+            return true;
+        }
+    }
+    return false;
+}
+
 export function isStartPointFullyBlocked(x, y, floorId, thickness = 200) {
     const testLength = MIN_WALL_LENGTH;
     const directions = [
