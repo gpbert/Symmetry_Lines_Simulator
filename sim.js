@@ -1501,8 +1501,8 @@ export function getRestrictedZones(wall) {
 export function findMergeableWall(newWall) {
     for (let i = 0; i < state.walls.length; i++) {
         const existing = state.walls[i];
-        const floorDiff = Math.abs(newWall.floorId - existing.floorId);
-        if (floorDiff > 1) continue;
+        // Only merge with walls on the same floor
+        if (existing.floorId !== newWall.floorId) continue;
         if (!existing.isParallelTo(newWall)) continue;
         const dist = newWall.distanceToWall(existing);
         if (dist >= 10) continue;
