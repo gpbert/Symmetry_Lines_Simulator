@@ -145,8 +145,9 @@ function onMouseDown(e) {
             const snappedY = sim.snapToGrid(pos.y, gridSize);
             let nudged;
             const isOnExtension = sim.isPointOnEnvelopeExtension(snappedX, snappedY, state.currentFloorId);
-            if (isDrawingInternalWall || isOnExtension) {
-                // Non-structural or at extension endpoint: free placement, no nudging
+            const isOnEnvBody = sim.isPointAtEnvelopeEndpoint(snappedX, snappedY, state.currentFloorId);
+            if (isDrawingInternalWall || isOnExtension || isOnEnvBody) {
+                // Non-structural, at extension, or at envelope body: free placement, no nudging
                 nudged = { x: snappedX, y: snappedY };
             } else {
                 nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
@@ -552,7 +553,8 @@ function onMouseMove(e) {
         const snappedY = sim.snapToGrid(pos.y, hoverGridSize);
         let nudged;
         const hoverAtExtension = sim.isPointOnEnvelopeExtension(snappedX, snappedY, state.currentFloorId);
-        if (hoverEnvelope || hoverAtExtension) {
+        const hoverAtEnvBody = sim.isPointAtEnvelopeEndpoint(snappedX, snappedY, state.currentFloorId);
+        if (hoverEnvelope || hoverAtExtension || hoverAtEnvBody) {
             // Inside envelope or at extension endpoint: free placement, no nudging
             nudged = { x: snappedX, y: snappedY };
         } else {
