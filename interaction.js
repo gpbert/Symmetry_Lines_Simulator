@@ -761,28 +761,32 @@ function onMouseMove(e) {
                     // Same grid line — flip to match existing wall's orientation
                     wallFlipped = !normalWall.sameOrientation(alignedWall);
                 } else {
-                    // Check if wall should face away from envelope
-                    const currentWall = wallFlipped
-                        ? new Wall(tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y, thickness, 2700, null, state.currentFloorId)
-                        : normalWall;
-
-                    if (sim.shouldFlipAwayFromEnvelope(currentWall)) {
-                        wallFlipped = !wallFlipped;
+                    // Check if the NORMAL wall should face away from envelope.
+                    // Always test the unflipped wall to get a stable answer.
+                    if (sim.shouldFlipAwayFromEnvelope(normalWall)) {
+                        // Normal orientation faces toward envelope — must flip
+                        wallFlipped = true;
                     } else {
-                        // Different grid line — check restrictions
-                        const restriction = sim.isWallInRestrictedZone(normalWall);
-                        if (restriction.restricted) {
-                            const flippedWall = new Wall(
-                                tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y,
-                                thickness, 2700, null, state.currentFloorId
-                            );
-                            const flippedRestriction = sim.isWallInRestrictedZone(flippedWall);
-                            if (!flippedRestriction.restricted) {
-                                wallFlipped = true;
-                            }
-                        } else {
-                            // No restriction — reset flip to default
+                        // Also check the flipped orientation
+                        const flippedWall = new Wall(
+                            tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y,
+                            thickness, 2700, null, state.currentFloorId
+                        );
+                        if (sim.shouldFlipAwayFromEnvelope(flippedWall)) {
+                            // Flipped orientation faces toward envelope — must NOT flip
                             wallFlipped = false;
+                        } else {
+                            // Neither orientation is forced by envelope — check restrictions
+                            const restriction = sim.isWallInRestrictedZone(normalWall);
+                            if (restriction.restricted) {
+                                const flippedRestriction = sim.isWallInRestrictedZone(flippedWall);
+                                if (!flippedRestriction.restricted) {
+                                    wallFlipped = true;
+                                }
+                            } else {
+                                // No restriction — reset flip to default
+                                wallFlipped = false;
+                            }
                         }
                     }
                 }
