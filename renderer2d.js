@@ -116,6 +116,52 @@ function drawGrid() {
     }
 }
 
+function getRestrictedGridCoords(skipIndices = new Set()) {
+    const restrictedX = new Set();
+    const restrictedY = new Set();
+
+    const relevantWalls = state.walls.filter((w, idx) =>
+        !skipIndices.has(idx) && (
+            w.floorId === state.currentFloorId ||
+            Math.abs(w.floorId - state.currentFloorId) === 1
+        )
+    );
+
+    const gridStep = GRID_SIZE_EXTERNAL;
+
+    relevantWalls.forEach(wall => {
+        if (sim.isInternalWall(wall)) return;
+
+        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+        const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
+        const normalDir = isHorizontal ? wall.n.y : wall.n.x;
+        const inEnvelope = sim.isWallInEnvelope(wall);
+        const hasExtension = inEnvelope && sim.envelopeWallHasExtension(wall);
+
+        const use1200 = inEnvelope && !hasExtension;
+        const zoneNeg = internalFace - ((use1200 && normalDir < 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
+        const zonePos = internalFace + ((use1200 && normalDir > 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
+
+        const firstGrid = Math.ceil(zoneNeg / gridStep) * gridStep;
+        for (let g = firstGrid; g <= zonePos; g += gridStep) {
+            const dist = Math.abs(g - internalFace);
+            if (dist < 10) continue;
+
+            const isOnNormalSide = (g - internalFace) * normalDir > 0;
+            const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
+            if (dist >= minDist - 2) continue;
+
+            if (isHorizontal) {
+                restrictedY.add(g);
+            } else {
+                restrictedX.add(g);
+            }
+        }
+    });
+
+    return { restrictedX, restrictedY };
+}
+
 function drawRestrictedZones(skipIndices = new Set()) {
     if (!state.showRestrictionLines) return;
     const relevantWalls = state.walls.filter((w, idx) =>
@@ -1244,6 +1290,8 @@ export const renderer2D = {
     set isPanning(val) { isPanning = val; },
 
     setInteractionState(istate) { _interactionState = istate; },
+
+    getRestrictedGridCoords: getRestrictedGridCoords,
 
     _onResize() {
         if (!canvas) return;
