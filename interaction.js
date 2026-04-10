@@ -49,6 +49,7 @@ export const interactionState = {
     get tempPoint() { return tempPoint; },
     get wallFlipped() { return wallFlipped; },
     get isDrawingInternalWall() { return isDrawingInternalWall; },
+    get isDrawingFromEnvelope() { return isDrawingFromEnvelope; },
     get drawingVoid() { return drawingVoid; },
     get stretchingWall() { return stretchingWall; },
     get stretchingEndpoint() { return stretchingEndpoint; },

@@ -146,7 +146,12 @@ function drawRestrictedZones(skipIndices = new Set()) {
         const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
         const normalDir = isHorizontal ? wall.n.y : wall.n.x;
         const inEnvelope = sim.isWallInEnvelope(wall);
-        const hasExtension = inEnvelope && sim.envelopeWallHasExtension(wall);
+        // Suppress 1200mm zone if wall has a placed extension OR if user is
+        // currently drawing a perpendicular wall from this envelope wall
+        const drawingFromThis = inEnvelope && _interactionState.isDrawingFromEnvelope
+            && _interactionState.drawingWall
+            && wall.containsPoint(_interactionState.drawingWall.x, _interactionState.drawingWall.y, 15);
+        const hasExtension = inEnvelope && (sim.envelopeWallHasExtension(wall) || drawingFromThis);
 
         ctx.strokeStyle = 'rgba(220, 38, 38, 0.5)';
         ctx.lineWidth = 4 / zoomLevel;
