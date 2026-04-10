@@ -1858,10 +1858,10 @@ export function isPointOnEnvelopeExtension(x, y, floorId) {
             if (Math.abs(envWall.floorId - floorId) > 1) continue;
             if (!envWall.isPerpendicularTo(wall)) continue;
 
-            // Check if the other endpoint is at an endpoint of the envelope wall
-            const atEnvA = Math.abs(otherEnd.x - envWall.pointA.x) < TOLERANCE && Math.abs(otherEnd.y - envWall.pointA.y) < TOLERANCE;
-            const atEnvB = Math.abs(otherEnd.x - envWall.pointB.x) < TOLERANCE && Math.abs(otherEnd.y - envWall.pointB.y) < TOLERANCE;
-            if (atEnvA || atEnvB) return true;
+            // Check if the other endpoint touches the envelope wall body or external face
+            if (envWall.containsPoint(otherEnd.x, otherEnd.y, TOLERANCE)) return true;
+            const envExt = envWall.getExternalFacePoints();
+            if (pointNearLineSegment(otherEnd, envExt.a, envExt.b, TOLERANCE)) return true;
         }
     }
     return false;
