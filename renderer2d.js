@@ -146,14 +146,16 @@ function drawRestrictedZones(skipIndices = new Set()) {
         const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
         const normalDir = isHorizontal ? wall.n.y : wall.n.x;
         const inEnvelope = sim.isWallInEnvelope(wall);
+        const hasExtension = inEnvelope && sim.envelopeWallHasExtension(wall);
 
         ctx.strokeStyle = 'rgba(220, 38, 38, 0.5)';
         ctx.lineWidth = 4 / zoomLevel;
 
-        // Asymmetric zone for envelope walls: 1200mm on external face side, 600mm on internal side
-        // Non-envelope walls: 600mm on both sides
-        const zoneNeg = internalFace - ((inEnvelope && normalDir < 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
-        const zonePos = internalFace + ((inEnvelope && normalDir > 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
+        // Asymmetric zone for envelope walls without extensions: 1200mm on external face side
+        // Envelope walls with extensions or non-envelope walls: 600mm on both sides
+        const use1200 = inEnvelope && !hasExtension;
+        const zoneNeg = internalFace - ((use1200 && normalDir < 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
+        const zonePos = internalFace + ((use1200 && normalDir > 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
 
         const firstGrid = Math.ceil(zoneNeg / gridStep) * gridStep;
         for (let g = firstGrid; g <= zonePos; g += gridStep) {
@@ -162,11 +164,11 @@ function drawRestrictedZones(skipIndices = new Set()) {
 
             // Determine min distance for this grid position's side
             const isOnNormalSide = (g - internalFace) * normalDir > 0;
-            const minDist = (inEnvelope && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
+            const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
             if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
 
             // For 1200mm envelope lines, clip to the envelope wall's length projection
-            const isEnvelopeLine = inEnvelope && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
+            const isEnvelopeLine = use1200 && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
             let lineStart, lineEnd;
             if (isEnvelopeLine) {
                 // Clip to wall extent

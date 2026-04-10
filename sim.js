@@ -303,7 +303,7 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, par
 
         // Envelope walls use 1200mm on their external face side, within projection
         let minDist = MIN_DISTANCE_PARALLEL;
-        if (!skipEnvelopeZone && isWallInEnvelope(wall)) {
+        if (!skipEnvelopeZone && isWallInEnvelope(wall) && !envelopeWallHasExtension(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
             // Check projection: for axis='x', coord is the endpoint X and parallelCoord would be Y (perpendicular)
@@ -1670,9 +1670,9 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
         if (dist < 10) continue;
 
         // Envelope walls use 1200mm on their external face side, but only
-        // within the envelope wall's projection (length extent)
+        // within the envelope wall's projection AND when no extensions exist
         let minDist = MIN_DISTANCE_PARALLEL;
-        if (isWallInEnvelope(wall)) {
+        if (isWallInEnvelope(wall) && !envelopeWallHasExtension(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
             if (isOnNormalSide && overlapsWallProjection({ x, y }, wall)) {
@@ -1759,6 +1759,7 @@ export function shouldFlipAwayFromEnvelope(wall) {
 
     for (const envWall of state.walls) {
         if (!isWallInEnvelope(envWall)) continue;
+        if (envelopeWallHasExtension(envWall)) continue; // extension exists — no forced orientation
         if (Math.abs(envWall.floorId - wall.floorId) > 1) continue;
         if (!envWall.isParallelTo(wall)) continue;
 
@@ -1866,6 +1867,25 @@ export function isPointOnEnvelopeExtension(x, y, floorId) {
             const atEnvB = Math.abs(otherEnd.x - envWall.pointB.x) < TOLERANCE && Math.abs(otherEnd.y - envWall.pointB.y) < TOLERANCE;
             if (atEnvA || atEnvB) return true;
         }
+    }
+    return false;
+}
+
+// Check if an envelope wall has any perpendicular walls extending from it
+// (indicating the user is building an extension, so 1200mm rules don't apply).
+export function envelopeWallHasExtension(envWall) {
+    const TOLERANCE = 10;
+    for (const wall of state.walls) {
+        if (wall === envWall) continue;
+        if (Math.abs(wall.floorId - envWall.floorId) > 1) continue;
+        if (!wall.isPerpendicularTo(envWall)) continue;
+        // Check if any endpoint of the perpendicular wall touches the envelope wall
+        if (envWall.containsPoint(wall.pointA.x, wall.pointA.y, TOLERANCE)) return true;
+        if (envWall.containsPoint(wall.pointB.x, wall.pointB.y, TOLERANCE)) return true;
+        // Also check external face
+        const ext = envWall.getExternalFacePoints();
+        if (pointNearLineSegment(wall.pointA, ext.a, ext.b, TOLERANCE)) return true;
+        if (pointNearLineSegment(wall.pointB, ext.a, ext.b, TOLERANCE)) return true;
     }
     return false;
 }
