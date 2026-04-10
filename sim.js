@@ -301,10 +301,9 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, par
 
         if (dist < 10) continue; // on the wall's own line — OK
 
-        // Envelope walls without extensions use 1200mm on their external face side,
-        // but only within the wall's projection
+        // Envelope walls use 1200mm on their external face side, within projection
         let minDist = MIN_DISTANCE_PARALLEL;
-        if (!skipEnvelopeZone && isWallInEnvelope(wall) && !envelopeWallHasExtension(wall)) {
+        if (!skipEnvelopeZone && isWallInEnvelope(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
             const pointForProjection = isHorizontal
@@ -1669,10 +1668,10 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
         if (dist < 10) continue;
 
         // Envelope walls use 1200mm on their external face side, but only
-        // Envelope walls without extensions use 1200mm on their external face side,
-        // but only within the wall's projection
+        // Envelope walls use 1200mm on their external face side,
+        // within the wall's projection
         let minDist = MIN_DISTANCE_PARALLEL;
-        if (isWallInEnvelope(wall) && !envelopeWallHasExtension(wall)) {
+        if (isWallInEnvelope(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
             if (isOnNormalSide && overlapsWallProjection({ x, y }, wall)) {
@@ -1759,7 +1758,6 @@ export function shouldFlipAwayFromEnvelope(wall) {
 
     for (const envWall of state.walls) {
         if (!isWallInEnvelope(envWall)) continue;
-        if (envelopeWallHasExtension(envWall)) continue; // extension exists — no forced orientation
         if (Math.abs(envWall.floorId - wall.floorId) > 1) continue;
         if (!envWall.isParallelTo(wall)) continue;
 
@@ -1804,7 +1802,6 @@ export function getEnvelopeProximityShift(startX, startY, endX, endY, floorId) {
 
     for (const envWall of state.walls) {
         if (!isWallInEnvelope(envWall)) continue;
-        if (envelopeWallHasExtension(envWall)) continue; // extension exists — no shift
         if (Math.abs(envWall.floorId - floorId) > 1) continue;
 
         const envIsH = Math.abs(envWall.d.x) > Math.abs(envWall.d.y);
