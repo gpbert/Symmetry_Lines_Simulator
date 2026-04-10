@@ -132,4 +132,45 @@ test.describe('Hide Unavailable Gridlines', () => {
         expect(result.x300restrictedByEnvelope).toBe(true);
         expect(result.x3300notRestrictedByInternal).toBe(true);
     });
+
+    test('e2e: drawing a wall dynamically hides nearby gridlines', async ({ page }) => {
+        // Get canvas center for coordinate calculation
+        const canvasBox = await page.locator('#mainCanvas').boundingBox();
+        const centerX = canvasBox.x + canvasBox.width / 2;
+        const centerY = canvasBox.y + canvasBox.height / 2;
+
+        // Ensure draw mode is active
+        await page.click('#drawWallBtn');
+        await page.waitForTimeout(100);
+
+        // Draw a horizontal wall by clicking two points
+        // Click first point (left of center)
+        await page.mouse.click(centerX - 200, centerY);
+        await page.waitForTimeout(100);
+
+        // Click second point (right of center) to complete wall
+        await page.mouse.click(centerX + 200, centerY);
+        await page.waitForTimeout(300);
+
+        // Verify that restricted grid coords are now populated
+        const result = await page.evaluate(() => {
+            const renderer = window.__renderer2D;
+            const sim = window.__sim;
+
+            // There should be at least one wall now
+            const wallCount = sim.state.walls.length;
+
+            // Get restricted coords
+            const { restrictedX, restrictedY } = renderer.getRestrictedGridCoords(new Set());
+
+            return {
+                wallCount,
+                hasRestrictedY: restrictedY.size > 0,
+                totalRestrictedY: restrictedY.size,
+            };
+        });
+
+        expect(result.wallCount).toBeGreaterThan(0);
+        expect(result.hasRestrictedY).toBe(true);
+    });
 });
