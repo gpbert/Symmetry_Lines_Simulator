@@ -172,14 +172,32 @@ function drawRestrictedZones(skipIndices = new Set()) {
             const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
             if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
 
-            // All restriction lines extend infinitely (enforcement matches rendering)
+            // 600mm lines extend infinitely. 1200mm envelope lines are clipped
+            // to the envelope wall's projection for visual clarity.
+            const isEnvelopeLine = use1200 && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
             ctx.beginPath();
-            if (isHorizontal) {
-                ctx.moveTo(mmToPx(infiniteLeft), mmToPx(g));
-                ctx.lineTo(mmToPx(infiniteRight), mmToPx(g));
+            if (isEnvelopeLine) {
+                const wallMin = isHorizontal
+                    ? Math.min(wall.pointA.x, wall.pointB.x)
+                    : Math.min(wall.pointA.y, wall.pointB.y);
+                const wallMax = isHorizontal
+                    ? Math.max(wall.pointA.x, wall.pointB.x)
+                    : Math.max(wall.pointA.y, wall.pointB.y);
+                if (isHorizontal) {
+                    ctx.moveTo(mmToPx(wallMin), mmToPx(g));
+                    ctx.lineTo(mmToPx(wallMax), mmToPx(g));
+                } else {
+                    ctx.moveTo(mmToPx(g), mmToPx(wallMin));
+                    ctx.lineTo(mmToPx(g), mmToPx(wallMax));
+                }
             } else {
-                ctx.moveTo(mmToPx(g), mmToPx(infiniteTop));
-                ctx.lineTo(mmToPx(g), mmToPx(infiniteBottom));
+                if (isHorizontal) {
+                    ctx.moveTo(mmToPx(infiniteLeft), mmToPx(g));
+                    ctx.lineTo(mmToPx(infiniteRight), mmToPx(g));
+                } else {
+                    ctx.moveTo(mmToPx(g), mmToPx(infiniteTop));
+                    ctx.lineTo(mmToPx(g), mmToPx(infiniteBottom));
+                }
             }
             ctx.stroke();
         }
