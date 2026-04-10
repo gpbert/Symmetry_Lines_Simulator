@@ -134,16 +134,19 @@ function onMouseDown(e) {
                 x: sim.snapToGrid(pos.x, gridSize),
                 y: sim.snapToGrid(pos.y, gridSize)
             };
-            // Only set when starting from an actual perpendicular extension wall
-            // (not from envelope body — we don't know the direction yet at click time)
-            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
+            // isDrawingFromEnvelope: true when starting from extension OR envelope body.
+            // Used for skipEnvelopeZone (endpoint snapping) — unlocks grid positions near envelope.
+            // The proximity shift and start nudging use more specific checks.
+            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId)
+                || sim.isPointAtEnvelopeEndpoint(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
 
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
             const snappedY = sim.snapToGrid(pos.y, gridSize);
             let nudged;
-            if (isDrawingInternalWall || isDrawingFromEnvelope) {
-                // Non-structural or envelope extension: free placement, no nudging
+            const isOnExtension = sim.isPointOnEnvelopeExtension(snappedX, snappedY, state.currentFloorId);
+            if (isDrawingInternalWall || isOnExtension) {
+                // Non-structural or at extension endpoint: free placement, no nudging
                 nudged = { x: snappedX, y: snappedY };
             } else {
                 nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);

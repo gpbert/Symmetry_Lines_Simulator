@@ -1871,7 +1871,6 @@ export function isPointOnEnvelopeExtension(x, y, floorId) {
 // (indicating the user is building an extension, so 1200mm rules don't apply).
 export function envelopeWallHasExtension(envWall) {
     const TOLERANCE = 10;
-    const envIdx = state.walls.indexOf(envWall);
     for (const wall of state.walls) {
         if (wall === envWall) continue;
         if (Math.abs(wall.floorId - envWall.floorId) > 1) continue;
@@ -1879,15 +1878,12 @@ export function envelopeWallHasExtension(envWall) {
         // Skip other envelope boundary walls — they're corners, not extensions
         if (isWallInEnvelope(wall)) continue;
         // Check if any endpoint of the perpendicular wall touches the envelope wall
-        const wallIdx = state.walls.indexOf(wall);
-        const aContains = envWall.containsPoint(wall.pointA.x, wall.pointA.y, TOLERANCE);
-        const bContains = envWall.containsPoint(wall.pointB.x, wall.pointB.y, TOLERANCE);
+        if (envWall.containsPoint(wall.pointA.x, wall.pointA.y, TOLERANCE)) return true;
+        if (envWall.containsPoint(wall.pointB.x, wall.pointB.y, TOLERANCE)) return true;
+        // Also check external face
         const ext = envWall.getExternalFacePoints();
-        const aNearExt = pointNearLineSegment(wall.pointA, ext.a, ext.b, TOLERANCE);
-        const bNearExt = pointNearLineSegment(wall.pointB, ext.a, ext.b, TOLERANCE);
-        console.log(`[EXT CHECK] envWall#${envIdx} vs wall#${wallIdx}: perp=${wall.isPerpendicularTo(envWall)}, aContains=${aContains}, bContains=${bContains}, aNearExt=${aNearExt}, bNearExt=${bNearExt}`);
-        if (aContains || bContains) return true;
-        if (aNearExt || bNearExt) return true;
+        if (pointNearLineSegment(wall.pointA, ext.a, ext.b, TOLERANCE)) return true;
+        if (pointNearLineSegment(wall.pointB, ext.a, ext.b, TOLERANCE)) return true;
     }
     return false;
 }
