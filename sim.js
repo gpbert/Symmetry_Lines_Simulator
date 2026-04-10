@@ -1769,9 +1769,6 @@ export function shouldFlipAwayFromEnvelope(wall) {
         if (dist < 10) continue; // on the same grid line — handled by alignment
         if (dist > MIN_DISTANCE_OPPOSITE + 10) continue; // too far
 
-        // Only apply within the envelope wall's projection
-        if (!overlapsWallProjection(wall, envWall)) continue;
-
         // Check if the new wall is on the external face side of the envelope wall
         const envNormalDir = isH ? envWall.n.y : envWall.n.x;
         const isOnExternalSide = (wallFace - envFace) * envNormalDir > 0;
