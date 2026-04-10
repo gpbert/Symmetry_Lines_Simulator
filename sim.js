@@ -301,12 +301,16 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, par
 
         if (dist < 10) continue; // on the wall's own line — OK
 
-        // Envelope walls without extensions use 1200mm on their external face side
+        // Envelope walls without extensions use 1200mm on their external face side,
+        // but only within the wall's projection
         let minDist = MIN_DISTANCE_PARALLEL;
         if (!skipEnvelopeZone && isWallInEnvelope(wall) && !envelopeWallHasExtension(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
-            if (isOnNormalSide) {
+            const pointForProjection = isHorizontal
+                ? { x: (axis === 'x' ? coord : parallelCoord), y: (axis === 'y' ? coord : parallelCoord) }
+                : { x: (axis === 'x' ? coord : parallelCoord), y: (axis === 'y' ? coord : parallelCoord) };
+            if (isOnNormalSide && overlapsWallProjection(pointForProjection, wall)) {
                 minDist = MIN_DISTANCE_OPPOSITE;
             }
         }
@@ -1665,12 +1669,13 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
         if (dist < 10) continue;
 
         // Envelope walls use 1200mm on their external face side, but only
-        // Envelope walls without extensions use 1200mm on their external face side
+        // Envelope walls without extensions use 1200mm on their external face side,
+        // but only within the wall's projection
         let minDist = MIN_DISTANCE_PARALLEL;
         if (isWallInEnvelope(wall) && !envelopeWallHasExtension(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
-            if (isOnNormalSide) {
+            if (isOnNormalSide && overlapsWallProjection({ x, y }, wall)) {
                 minDist = MIN_DISTANCE_OPPOSITE;
             }
         }
@@ -1766,7 +1771,8 @@ export function shouldFlipAwayFromEnvelope(wall) {
         if (dist < 10) continue; // on the same grid line — handled by alignment
         if (dist > MIN_DISTANCE_OPPOSITE + 10) continue; // too far
 
-        // No projection check — the 1200mm rule applies along the entire grid line
+        // Only apply within the envelope wall's projection
+        if (!overlapsWallProjection(wall, envWall)) continue;
 
         // Check if the new wall is on the external face side of the envelope wall
         const envNormalDir = isH ? envWall.n.y : envWall.n.x;
@@ -1819,7 +1825,7 @@ export function getEnvelopeProximityShift(startX, startY, endX, endY, floorId) {
 
         // Check projection overlap: does the drawing wall overlap with the envelope wall's length?
         const tempWall = { pointA: { x: startX, y: startY }, pointB: { x: endX, y: endY } };
-        // No projection check — the 1200mm rule applies along the entire grid line
+        if (!overlapsWallProjection(tempWall, envWall)) continue;
 
         // Wall is in the zone and overlaps projection — compute shift
         const targetDist = MIN_DISTANCE_OPPOSITE;
