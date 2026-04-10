@@ -1753,6 +1753,10 @@ function overlapsWallProjection(pointOrWall, envWall) {
 // and its normal points TOWARD the envelope (wrong — should face away).
 // Only applies within the envelope wall's projection (length extent).
 export function shouldFlipAwayFromEnvelope(wall) {
+    // Skip if the wall starts on a perpendicular extension from an envelope
+    if (isPointOnEnvelopeExtension(wall.pointA.x, wall.pointA.y, wall.floorId)) return false;
+    if (isPointOnEnvelopeExtension(wall.pointB.x, wall.pointB.y, wall.floorId)) return false;
+
     for (const envWall of state.walls) {
         if (!isWallInEnvelope(envWall)) continue;
         if (Math.abs(envWall.floorId - wall.floorId) > 1) continue;
@@ -1790,6 +1794,9 @@ export function shouldFlipAwayFromEnvelope(wall) {
 // Returns { shiftX, shiftY } if the wall overlaps an envelope wall's projection
 // and is within the 1200mm zone on its external side. Returns null otherwise.
 export function getEnvelopeProximityShift(startX, startY, endX, endY, floorId) {
+    // Skip if the start point is on a wall extending from an envelope (building extension)
+    if (isPointOnEnvelopeExtension(startX, startY, floorId)) return null;
+
     const isH = Math.abs(endX - startX) > Math.abs(endY - startY);
     // The perpendicular coordinate of the wall being drawn
     const perpCoord = isH ? startY : startX;
@@ -1833,6 +1840,34 @@ export function getEnvelopeProximityShift(startX, startY, endX, endY, floorId) {
         }
     }
     return null;
+}
+
+// Check if a point is at the endpoint of a wall that extends perpendicular from an envelope.
+// This indicates the user is extending the building, so envelope proximity rules don't apply.
+export function isPointOnEnvelopeExtension(x, y, floorId) {
+    const TOLERANCE = 10;
+    for (const wall of state.walls) {
+        if (Math.abs(wall.floorId - floorId) > 1) continue;
+
+        // Check if the point is at either endpoint of this wall
+        const atA = Math.abs(x - wall.pointA.x) < TOLERANCE && Math.abs(y - wall.pointA.y) < TOLERANCE;
+        const atB = Math.abs(x - wall.pointB.x) < TOLERANCE && Math.abs(y - wall.pointB.y) < TOLERANCE;
+        if (!atA && !atB) continue;
+
+        // Check if the OTHER endpoint of this wall connects to an envelope wall
+        const otherEnd = atA ? wall.pointB : wall.pointA;
+        for (const envWall of state.walls) {
+            if (!isWallInEnvelope(envWall)) continue;
+            if (Math.abs(envWall.floorId - floorId) > 1) continue;
+            if (!envWall.isPerpendicularTo(wall)) continue;
+
+            // Check if the other endpoint is at an endpoint of the envelope wall
+            const atEnvA = Math.abs(otherEnd.x - envWall.pointA.x) < TOLERANCE && Math.abs(otherEnd.y - envWall.pointA.y) < TOLERANCE;
+            const atEnvB = Math.abs(otherEnd.x - envWall.pointB.x) < TOLERANCE && Math.abs(otherEnd.y - envWall.pointB.y) < TOLERANCE;
+            if (atEnvA || atEnvB) return true;
+        }
+    }
+    return false;
 }
 
 export function isStartPointFullyBlocked(x, y, floorId, thickness = 200) {
