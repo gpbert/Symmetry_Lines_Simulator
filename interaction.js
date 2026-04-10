@@ -26,6 +26,7 @@ let tempPoint = null;
 let wallFlipped = false;
 let manualFlip = false; // true when user pressed Space to flip — prevents auto-flip override
 let isDrawingInternalWall = false;
+let isDrawingFromEnvelope = false; // true when starting from an envelope wall endpoint
 
 let drawingToastElement = null;
 let drawingVoid = null;
@@ -88,6 +89,8 @@ export function resetDrawingState() {
     tempPoint = null;
     wallFlipped = false;
     manualFlip = false;
+    isDrawingInternalWall = false;
+    isDrawingFromEnvelope = false;
 
     drawingVoid = null;
     clearDrawingToast();
@@ -125,12 +128,20 @@ function onMouseDown(e) {
             isDrawingInternalWall = !!envelope;
             const gridSize = isDrawingInternalWall ? GRID_SIZE_INTERNAL : GRID_SIZE_EXTERNAL;
 
+            // Detect if starting from an envelope wall endpoint (building extension)
+            const snappedForCheck = {
+                x: sim.snapToGrid(pos.x, gridSize),
+                y: sim.snapToGrid(pos.y, gridSize)
+            };
+            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId)
+                || sim.isPointAtEnvelopeEndpoint(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
+
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
             const snappedY = sim.snapToGrid(pos.y, gridSize);
             let nudged;
-            if (isDrawingInternalWall) {
-                // Non-structural: free placement, no nudging
+            if (isDrawingInternalWall || isDrawingFromEnvelope) {
+                // Non-structural or envelope extension: free placement, no nudging
                 nudged = { x: snappedX, y: snappedY };
             } else {
                 nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, gridSize);
@@ -159,7 +170,7 @@ function onMouseDown(e) {
             }
 
             const placementLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
-            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid);
+            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, isDrawingFromEnvelope);
 
             // Apply envelope proximity shift if present
             const shiftX = drawingWall._shiftX || 0;
@@ -216,6 +227,7 @@ function onMouseDown(e) {
                         drawingWall = null;
                         tempPoint = null;
                         isDrawingInternalWall = false;
+            isDrawingFromEnvelope = false;
                         clearDrawingToast();
                         r.draw();
                         return;
@@ -268,6 +280,7 @@ function onMouseDown(e) {
             wallFlipped = false;
             manualFlip = false;
             isDrawingInternalWall = false;
+            isDrawingFromEnvelope = false;
         
             clearDrawingToast();
             updateUI();
@@ -746,7 +759,7 @@ function onMouseMove(e) {
         }
 
         const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
-        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid);
+        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, isDrawingFromEnvelope);
 
         // Check if the wall should shift away from an envelope wall's projection
         if (tempPoint && !isDrawingInternalWall) {

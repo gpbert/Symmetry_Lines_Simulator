@@ -278,7 +278,7 @@ export function snapToVoidGrid(value) {
 // Check if a coordinate is on a restricted grid line along a given axis.
 // axis: 'x' checks vertical walls' restriction zones (for horizontal wall endpoints),
 //        'y' checks horizontal walls' restriction zones (for vertical wall endpoints).
-function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, parallelCoord = null) {
+function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, parallelCoord = null, skipEnvelopeZone = false) {
     // Non-structural walls have no endpoint restrictions
     if (forInternalWall) return false;
 
@@ -303,7 +303,7 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, par
 
         // Envelope walls use 1200mm on their external face side, within projection
         let minDist = MIN_DISTANCE_PARALLEL;
-        if (isWallInEnvelope(wall)) {
+        if (!skipEnvelopeZone && isWallInEnvelope(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
             // Check projection: for axis='x', coord is the endpoint X and parallelCoord would be Y (perpendicular)
@@ -326,7 +326,7 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, par
 // skipping endpoint positions that land on restricted grid lines.
 // lengthGrid defaults to WALL_LENGTH_GRID (300mm) for external walls;
 // pass GRID_SIZE_INTERNAL (100mm) for internal walls.
-export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WALL_LENGTH_GRID) {
+export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WALL_LENGTH_GRID, skipEnvelopeZone = false) {
     const forInternalWall = lengthGrid === GRID_SIZE_INTERNAL;
     const minLen = forInternalWall ? MIN_WALL_LENGTH_NON_STRUCTURAL : MIN_WALL_LENGTH;
     const dx = endPoint.x - startPoint.x;
@@ -341,7 +341,7 @@ export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WAL
         if (floorId !== undefined && !forInternalWall) {
             while (snappedLength >= minLen) {
                 const endX = startPoint.x + direction * snappedLength;
-                if (!isEndpointRestricted(endX, 'x', floorId, forInternalWall, startPoint.y)) break;
+                if (!isEndpointRestricted(endX, 'x', floorId, forInternalWall, startPoint.y, skipEnvelopeZone)) break;
                 snappedLength -= lengthGrid;
             }
         }
@@ -357,7 +357,7 @@ export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WAL
         if (floorId !== undefined && !forInternalWall) {
             while (snappedLength >= minLen) {
                 const endY = startPoint.y + direction * snappedLength;
-                if (!isEndpointRestricted(endY, 'y', floorId, forInternalWall, startPoint.x)) break;
+                if (!isEndpointRestricted(endY, 'y', floorId, forInternalWall, startPoint.x, skipEnvelopeZone)) break;
                 snappedLength -= lengthGrid;
             }
         }
@@ -1866,6 +1866,19 @@ export function isPointOnEnvelopeExtension(x, y, floorId) {
             const atEnvB = Math.abs(otherEnd.x - envWall.pointB.x) < TOLERANCE && Math.abs(otherEnd.y - envWall.pointB.y) < TOLERANCE;
             if (atEnvA || atEnvB) return true;
         }
+    }
+    return false;
+}
+
+// Check if a point is at the endpoint of an envelope boundary wall.
+export function isPointAtEnvelopeEndpoint(x, y, floorId) {
+    const TOLERANCE = 10;
+    for (const wall of state.walls) {
+        if (!isWallInEnvelope(wall)) continue;
+        if (Math.abs(wall.floorId - floorId) > 1) continue;
+        const atA = Math.abs(x - wall.pointA.x) < TOLERANCE && Math.abs(y - wall.pointA.y) < TOLERANCE;
+        const atB = Math.abs(x - wall.pointB.x) < TOLERANCE && Math.abs(y - wall.pointB.y) < TOLERANCE;
+        if (atA || atB) return true;
     }
     return false;
 }
