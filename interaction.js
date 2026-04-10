@@ -161,10 +161,14 @@ function onMouseDown(e) {
             const placementLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
             finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid);
 
-            const startX = wallFlipped ? finalPos.x : drawingWall.x;
-            const startY = wallFlipped ? finalPos.y : drawingWall.y;
-            const endX = wallFlipped ? drawingWall.x : finalPos.x;
-            const endY = wallFlipped ? drawingWall.y : finalPos.y;
+            // Apply envelope proximity shift if present
+            const shiftX = drawingWall._shiftX || 0;
+            const shiftY = drawingWall._shiftY || 0;
+
+            const startX = (wallFlipped ? finalPos.x : drawingWall.x) + shiftX;
+            const startY = (wallFlipped ? finalPos.y : drawingWall.y) + shiftY;
+            const endX = (wallFlipped ? drawingWall.x : finalPos.x) + shiftX;
+            const endY = (wallFlipped ? drawingWall.y : finalPos.y) + shiftY;
 
             const newWall = new Wall(
                 startX, startY, endX, endY,
@@ -744,14 +748,32 @@ function onMouseMove(e) {
         const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid);
 
+        // Check if the wall should shift away from an envelope wall's projection
+        if (tempPoint && !isDrawingInternalWall) {
+            const shift = sim.getEnvelopeProximityShift(
+                drawingWall.x, drawingWall.y,
+                tempPoint.x, tempPoint.y,
+                state.currentFloorId
+            );
+            if (shift) {
+                drawingWall._shiftX = shift.shiftX;
+                drawingWall._shiftY = shift.shiftY;
+            } else {
+                drawingWall._shiftX = 0;
+                drawingWall._shiftY = 0;
+            }
+        }
+
         // Auto-flip logic (only when user hasn't manually flipped via Space):
         // 1. Same grid line: flip to match existing wall's orientation
         // 2. Different grid line + restricted: flip to resolve restriction
         if (tempPoint && !manualFlip) {
             const thickness = parseInt(document.getElementById('wallThickness').value);
+            const sx = drawingWall._shiftX || 0;
+            const sy = drawingWall._shiftY || 0;
 
             const normalWall = new Wall(
-                drawingWall.x, drawingWall.y, tempPoint.x, tempPoint.y,
+                drawingWall.x + sx, drawingWall.y + sy, tempPoint.x + sx, tempPoint.y + sy,
                 thickness, 2700, null, state.currentFloorId
             );
 
@@ -769,7 +791,7 @@ function onMouseMove(e) {
                     } else {
                         // Also check the flipped orientation
                         const flippedWall = new Wall(
-                            tempPoint.x, tempPoint.y, drawingWall.x, drawingWall.y,
+                            tempPoint.x + sx, tempPoint.y + sy, drawingWall.x + sx, drawingWall.y + sy,
                             thickness, 2700, null, state.currentFloorId
                         );
                         if (sim.shouldFlipAwayFromEnvelope(flippedWall)) {

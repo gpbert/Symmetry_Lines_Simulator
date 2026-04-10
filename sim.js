@@ -1786,6 +1786,55 @@ export function shouldFlipAwayFromEnvelope(wall) {
     return false;
 }
 
+// Check if a wall being drawn should be shifted away from an envelope wall.
+// Returns { shiftX, shiftY } if the wall overlaps an envelope wall's projection
+// and is within the 1200mm zone on its external side. Returns null otherwise.
+export function getEnvelopeProximityShift(startX, startY, endX, endY, floorId) {
+    const isH = Math.abs(endX - startX) > Math.abs(endY - startY);
+    // The perpendicular coordinate of the wall being drawn
+    const perpCoord = isH ? startY : startX;
+
+    for (const envWall of state.walls) {
+        if (!isWallInEnvelope(envWall)) continue;
+        if (Math.abs(envWall.floorId - floorId) > 1) continue;
+
+        const envIsH = Math.abs(envWall.d.x) > Math.abs(envWall.d.y);
+        // Only check walls perpendicular to the drawing wall's perpendicular axis
+        // i.e., both horizontal or both vertical
+        if (envIsH !== isH) continue;
+
+        const envFace = envIsH ? envWall.pointA.y : envWall.pointA.x;
+        const dist = Math.abs(perpCoord - envFace);
+
+        if (dist < 10) continue; // aligned — handled elsewhere
+        if (dist >= MIN_DISTANCE_OPPOSITE) continue; // already far enough
+
+        // Check if on the external face side
+        const envNormalDir = envIsH ? envWall.n.y : envWall.n.x;
+        const isOnExternalSide = (perpCoord - envFace) * envNormalDir > 0;
+        if (!isOnExternalSide) continue;
+
+        // Check projection overlap: does the drawing wall overlap with the envelope wall's length?
+        const tempWall = { pointA: { x: startX, y: startY }, pointB: { x: endX, y: endY } };
+        if (!overlapsWallProjection(tempWall, envWall)) continue;
+
+        // Wall is in the zone and overlaps projection — compute shift
+        const targetDist = MIN_DISTANCE_OPPOSITE;
+        const shiftAmount = (targetDist - dist) * (envNormalDir > 0 ? 1 : -1);
+
+        if (isH) {
+            // Shift Y for horizontal walls
+            const snappedTarget = snapToGrid(perpCoord + shiftAmount, GRID_SIZE_EXTERNAL);
+            return { shiftX: 0, shiftY: snappedTarget - perpCoord };
+        } else {
+            // Shift X for vertical walls
+            const snappedTarget = snapToGrid(perpCoord + shiftAmount, GRID_SIZE_EXTERNAL);
+            return { shiftX: snappedTarget - perpCoord, shiftY: 0 };
+        }
+    }
+    return null;
+}
+
 export function isStartPointFullyBlocked(x, y, floorId, thickness = 200) {
     const testLength = MIN_WALL_LENGTH;
     const directions = [

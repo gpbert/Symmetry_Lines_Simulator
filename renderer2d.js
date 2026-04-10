@@ -755,10 +755,13 @@ function draw() {
 
     // Draw temporary wall while drawing
     if (drawingWall && tempPoint && (drawingWall.x !== tempPoint.x || drawingWall.y !== tempPoint.y)) {
-        const startX = wallFlipped ? tempPoint.x : drawingWall.x;
-        const startY = wallFlipped ? tempPoint.y : drawingWall.y;
-        const endX = wallFlipped ? drawingWall.x : tempPoint.x;
-        const endY = wallFlipped ? drawingWall.y : tempPoint.y;
+        // Apply envelope proximity shift if present
+        const shiftX = drawingWall._shiftX || 0;
+        const shiftY = drawingWall._shiftY || 0;
+        const startX = (wallFlipped ? tempPoint.x : drawingWall.x) + shiftX;
+        const startY = (wallFlipped ? tempPoint.y : drawingWall.y) + shiftY;
+        const endX = (wallFlipped ? drawingWall.x : tempPoint.x) + shiftX;
+        const endY = (wallFlipped ? drawingWall.y : tempPoint.y) + shiftY;
 
         const tempWall = new Wall(
             startX,
