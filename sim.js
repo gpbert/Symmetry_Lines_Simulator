@@ -286,6 +286,9 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, par
         // Non-structural walls don't create restriction zones
         if (isInternalWall(wall)) continue;
 
+        // When drawing from an envelope (extension), skip all envelope wall restrictions
+        if (skipEnvelopeZone && isWallInEnvelope(wall)) continue;
+
         const floorDiff = Math.abs(wall.floorId - floorId);
         if (floorDiff > 1) continue;
 
