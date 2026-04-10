@@ -54,7 +54,7 @@ function pxSnapToGrid(px, gridSize = GRID_SIZE_EXTERNAL) {
 // ============================================================
 // Drawing helpers
 // ============================================================
-function drawGrid() {
+function drawGrid(restrictedX = new Set(), restrictedY = new Set()) {
     if (!ctx || !canvas) {
         console.error('Canvas not initialized in drawGrid!');
         return;
@@ -79,12 +79,14 @@ function drawGrid() {
     ctx.strokeStyle = '#999999';
     ctx.lineWidth = 2 / zoomLevel;
     for (let x = startX; x <= endX; x += gridStepExternal) {
+        if (restrictedX.has(Math.round(pxToMm(x)))) continue;
         ctx.beginPath();
         ctx.moveTo(x, visibleTop);
         ctx.lineTo(x, visibleBottom);
         ctx.stroke();
     }
     for (let y = startY; y <= endY; y += gridStepExternal) {
+        if (restrictedY.has(Math.round(pxToMm(y)))) continue;
         ctx.beginPath();
         ctx.moveTo(visibleLeft, y);
         ctx.lineTo(visibleRight, y);
@@ -162,7 +164,7 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
     return { restrictedX, restrictedY };
 }
 
-function drawRestrictedZones(skipIndices = new Set()) {
+function drawRestrictedZones(skipIndices = new Set(), restrictedCoords = null) {
     if (!state.showRestrictionLines) return;
     const relevantWalls = state.walls.filter((w, idx) =>
         !skipIndices.has(idx) && (
@@ -217,6 +219,12 @@ function drawRestrictedZones(skipIndices = new Set()) {
             const isOnNormalSide = (g - internalFace) * normalDir > 0;
             const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
             if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
+
+            // Skip drawing red line if this gridline is already hidden
+            if (restrictedCoords) {
+                const coordSet = isHorizontal ? restrictedCoords.restrictedY : restrictedCoords.restrictedX;
+                if (coordSet.has(g)) continue;
+            }
 
             // 600mm lines extend infinitely. 1200mm envelope lines are clipped
             // to the envelope wall's projection for visual clarity.
@@ -550,8 +558,6 @@ function draw() {
     // Apply pan and zoom transformation
     ctx.setTransform(zoomLevel, 0, 0, zoomLevel, panOffset.x, panOffset.y);
 
-    drawGrid();
-
     // Thickness override: when drawing on a grid line with different thickness walls,
     // temporarily show those walls at the new thickness during preview
     const thicknessOverrides = new Map(); // wallIndex -> newThickness
@@ -571,9 +577,13 @@ function draw() {
         }
     }
 
-    // Draw persistent restriction zones (skip walls being thickness-converted)
     const skipZoneIndices = new Set(thicknessOverrides.keys());
-    drawRestrictedZones(skipZoneIndices);
+    const restrictedCoords = getRestrictedGridCoords(skipZoneIndices);
+    drawGrid(restrictedCoords.restrictedX, restrictedCoords.restrictedY);
+
+    // Draw persistent restriction zones (skip walls being thickness-converted,
+    // and skip red lines for gridlines that are already hidden)
+    drawRestrictedZones(skipZoneIndices, restrictedCoords);
 
     // Draw building envelopes (waffle slabs) - BEFORE walls so walls appear on top
     drawBuildingEnvelopes();
