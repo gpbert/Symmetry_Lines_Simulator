@@ -764,7 +764,8 @@ function onMouseMove(e) {
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, isDrawingFromEnvelope);
 
         // Check if the wall should shift away from an envelope wall's projection
-        if (tempPoint && !isDrawingInternalWall) {
+        // Skip shift when drawing from an envelope extension
+        if (tempPoint && !isDrawingInternalWall && !isDrawingFromEnvelope) {
             const shift = sim.getEnvelopeProximityShift(
                 drawingWall.x, drawingWall.y,
                 tempPoint.x, tempPoint.y,
