@@ -546,8 +546,9 @@ function onMouseMove(e) {
         const snappedX = sim.snapToGrid(pos.x, hoverGridSize);
         const snappedY = sim.snapToGrid(pos.y, hoverGridSize);
         let nudged;
-        if (hoverEnvelope) {
-            // Inside envelope: non-structural, free placement
+        const hoverAtEnvEndpoint = sim.isPointAtEnvelopeEndpoint(snappedX, snappedY, state.currentFloorId);
+        if (hoverEnvelope || hoverAtEnvEndpoint) {
+            // Inside envelope or at envelope endpoint: free placement, no nudging
             nudged = { x: snappedX, y: snappedY };
         } else {
             nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);

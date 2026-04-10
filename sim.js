@@ -1870,15 +1870,20 @@ export function isPointOnEnvelopeExtension(x, y, floorId) {
     return false;
 }
 
-// Check if a point is at the endpoint of an envelope boundary wall.
+// Check if a point is at or near an endpoint of an envelope boundary wall
+// (including external face endpoints and column positions).
 export function isPointAtEnvelopeEndpoint(x, y, floorId) {
-    const TOLERANCE = 10;
+    const TOLERANCE = 15; // slightly larger to catch column positions
     for (const wall of state.walls) {
         if (!isWallInEnvelope(wall)) continue;
         if (Math.abs(wall.floorId - floorId) > 1) continue;
-        const atA = Math.abs(x - wall.pointA.x) < TOLERANCE && Math.abs(y - wall.pointA.y) < TOLERANCE;
-        const atB = Math.abs(x - wall.pointB.x) < TOLERANCE && Math.abs(y - wall.pointB.y) < TOLERANCE;
-        if (atA || atB) return true;
+        // Check internal face endpoints
+        if (Math.abs(x - wall.pointA.x) < TOLERANCE && Math.abs(y - wall.pointA.y) < TOLERANCE) return true;
+        if (Math.abs(x - wall.pointB.x) < TOLERANCE && Math.abs(y - wall.pointB.y) < TOLERANCE) return true;
+        // Check external face endpoints
+        const ext = wall.getExternalFacePoints();
+        if (Math.abs(x - ext.a.x) < TOLERANCE && Math.abs(y - ext.a.y) < TOLERANCE) return true;
+        if (Math.abs(x - ext.b.x) < TOLERANCE && Math.abs(y - ext.b.y) < TOLERANCE) return true;
     }
     return false;
 }
