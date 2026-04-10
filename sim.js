@@ -1737,11 +1737,12 @@ export function shouldFlipAwayFromEnvelope(wall) {
         const isOnExternalSide = (wallFace - envFace) * envNormalDir > 0;
         if (!isOnExternalSide) continue;
 
-        // The new wall IS on the external side — its normal should point AWAY from envelope
-        // (i.e., same direction as the envelope wall's normal)
+        // The new wall IS on the external side — its blue line (internal face) should
+        // face AWAY from the envelope. Since the normal points toward the external face,
+        // the normal should point TOWARD the envelope (opposite to envelope wall's normal).
         const wallNormalDir = isH ? wall.n.y : wall.n.x;
-        if (wallNormalDir * envNormalDir < 0) {
-            // Wall's normal points toward the envelope — needs to flip
+        if (wallNormalDir * envNormalDir > 0) {
+            // Wall's normal points same way as envelope's — blue line faces toward envelope — needs to flip
             return true;
         }
     }
