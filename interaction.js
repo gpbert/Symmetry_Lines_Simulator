@@ -134,7 +134,11 @@ function onMouseDown(e) {
                 x: sim.snapToGrid(pos.x, gridSize),
                 y: sim.snapToGrid(pos.y, gridSize)
             };
-            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
+            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId)
+                || sim.isPointAtEnvelopeEndpoint(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
+            // Note: isDrawingFromEnvelope is used for skipEnvelopeZone in endpoint snapping
+            // and to skip start point nudging. The shouldFlipAwayFromEnvelope and
+            // getEnvelopeProximityShift have their own projection-based checks.
 
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
@@ -763,8 +767,9 @@ function onMouseMove(e) {
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, isDrawingFromEnvelope);
 
         // Check if the wall should shift away from an envelope wall's projection
-        // Skip shift when drawing from an envelope extension
-        if (tempPoint && !isDrawingInternalWall && !isDrawingFromEnvelope) {
+        // Only skip shift when drawing from an actual envelope extension (not envelope body)
+        const isOnExtension = sim.isPointOnEnvelopeExtension(drawingWall.x, drawingWall.y, state.currentFloorId);
+        if (tempPoint && !isDrawingInternalWall && !isOnExtension) {
             const shift = sim.getEnvelopeProximityShift(
                 drawingWall.x, drawingWall.y,
                 tempPoint.x, tempPoint.y,
