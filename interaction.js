@@ -134,11 +134,9 @@ function onMouseDown(e) {
                 x: sim.snapToGrid(pos.x, gridSize),
                 y: sim.snapToGrid(pos.y, gridSize)
             };
-            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId)
-                || sim.isPointAtEnvelopeEndpoint(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
-            // Note: isDrawingFromEnvelope is used for skipEnvelopeZone in endpoint snapping
-            // and to skip start point nudging. The shouldFlipAwayFromEnvelope and
-            // getEnvelopeProximityShift have their own projection-based checks.
+            // Only set when starting from an actual perpendicular extension wall
+            // (not from envelope body — we don't know the direction yet at click time)
+            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
 
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
