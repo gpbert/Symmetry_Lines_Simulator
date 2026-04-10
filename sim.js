@@ -278,7 +278,7 @@ export function snapToVoidGrid(value) {
 // Check if a coordinate is on a restricted grid line along a given axis.
 // axis: 'x' checks vertical walls' restriction zones (for horizontal wall endpoints),
 //        'y' checks horizontal walls' restriction zones (for vertical wall endpoints).
-function isEndpointRestricted(coord, axis, floorId, forInternalWall = false) {
+function isEndpointRestricted(coord, axis, floorId, forInternalWall = false, parallelCoord = null) {
     // Non-structural walls have no endpoint restrictions
     if (forInternalWall) return false;
 
@@ -301,12 +301,17 @@ function isEndpointRestricted(coord, axis, floorId, forInternalWall = false) {
 
         if (dist < 10) continue; // on the wall's own line — OK
 
-        // Envelope walls use 1200mm on their external face side
+        // Envelope walls use 1200mm on their external face side, within projection
         let minDist = MIN_DISTANCE_PARALLEL;
         if (isWallInEnvelope(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
-            if (isOnNormalSide) {
+            // Check projection: for axis='x', coord is the endpoint X and parallelCoord would be Y (perpendicular)
+            // But here we need the point along the wall axis to check projection
+            const pointForProjection = isHorizontal
+                ? { x: (axis === 'x' ? coord : parallelCoord), y: (axis === 'y' ? coord : parallelCoord) }
+                : { x: (axis === 'x' ? coord : parallelCoord), y: (axis === 'y' ? coord : parallelCoord) };
+            if (isOnNormalSide && overlapsWallProjection(pointForProjection, wall)) {
                 minDist = MIN_DISTANCE_OPPOSITE;
             }
         }
@@ -336,7 +341,7 @@ export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WAL
         if (floorId !== undefined && !forInternalWall) {
             while (snappedLength >= minLen) {
                 const endX = startPoint.x + direction * snappedLength;
-                if (!isEndpointRestricted(endX, 'x', floorId, forInternalWall)) break;
+                if (!isEndpointRestricted(endX, 'x', floorId, forInternalWall, startPoint.y)) break;
                 snappedLength -= lengthGrid;
             }
         }
@@ -352,7 +357,7 @@ export function snapLengthToGrid(startPoint, endPoint, floorId, lengthGrid = WAL
         if (floorId !== undefined && !forInternalWall) {
             while (snappedLength >= minLen) {
                 const endY = startPoint.y + direction * snappedLength;
-                if (!isEndpointRestricted(endY, 'y', floorId, forInternalWall)) break;
+                if (!isEndpointRestricted(endY, 'y', floorId, forInternalWall, startPoint.x)) break;
                 snappedLength -= lengthGrid;
             }
         }
@@ -1664,12 +1669,13 @@ export function findRestrictingWallAtPoint(x, y, floorId, forInternalWall = fals
         // On the internal face line itself is OK (aligned walls are valid)
         if (dist < 10) continue;
 
-        // Envelope walls use 1200mm on their external face side (outside the building)
+        // Envelope walls use 1200mm on their external face side, but only
+        // within the envelope wall's projection (length extent)
         let minDist = MIN_DISTANCE_PARALLEL;
         if (isWallInEnvelope(wall)) {
             const normalDir = isHorizontal ? wall.n.y : wall.n.x;
             const isOnNormalSide = (coord - internalFace) * normalDir > 0;
-            if (isOnNormalSide) {
+            if (isOnNormalSide && overlapsWallProjection({ x, y }, wall)) {
                 minDist = MIN_DISTANCE_OPPOSITE;
             }
         }
@@ -1715,9 +1721,37 @@ export function nudgeStartPointOutOfZones(x, y, floorId, gridSize = GRID_SIZE_EX
 // Check if a start point is completely blocked — no valid wall can be placed in any
 // direction from this point. Tests a minimal wall in all 4 cardinal directions with
 // both orientations. Returns true if ALL would be restricted.
+// Check if a point overlaps with a wall's projection along the wall axis.
+// For horizontal walls, checks X overlap. For vertical walls, checks Y overlap.
+function overlapsWallProjection(pointOrWall, envWall) {
+    const isH = Math.abs(envWall.d.x) > Math.abs(envWall.d.y);
+    const envMin = isH
+        ? Math.min(envWall.pointA.x, envWall.pointB.x)
+        : Math.min(envWall.pointA.y, envWall.pointB.y);
+    const envMax = isH
+        ? Math.max(envWall.pointA.x, envWall.pointB.x)
+        : Math.max(envWall.pointA.y, envWall.pointB.y);
+
+    if (pointOrWall.pointA) {
+        // It's a wall — check if any part overlaps
+        const wallMin = isH
+            ? Math.min(pointOrWall.pointA.x, pointOrWall.pointB.x)
+            : Math.min(pointOrWall.pointA.y, pointOrWall.pointB.y);
+        const wallMax = isH
+            ? Math.max(pointOrWall.pointA.x, pointOrWall.pointB.x)
+            : Math.max(pointOrWall.pointA.y, pointOrWall.pointB.y);
+        return wallMax > envMin - 5 && wallMin < envMax + 5;
+    } else {
+        // It's a point {x, y}
+        const coord = isH ? pointOrWall.x : pointOrWall.y;
+        return coord >= envMin - 5 && coord <= envMax + 5;
+    }
+}
+
 // Check if a wall should be flipped to face away from a nearby envelope wall.
 // Returns true if the wall is on the external face side of an envelope wall
 // and its normal points TOWARD the envelope (wrong — should face away).
+// Only applies within the envelope wall's projection (length extent).
 export function shouldFlipAwayFromEnvelope(wall) {
     for (const envWall of state.walls) {
         if (!isWallInEnvelope(envWall)) continue;
@@ -1731,6 +1765,9 @@ export function shouldFlipAwayFromEnvelope(wall) {
 
         if (dist < 10) continue; // on the same grid line — handled by alignment
         if (dist > MIN_DISTANCE_OPPOSITE + 10) continue; // too far
+
+        // Only apply within the envelope wall's projection
+        if (!overlapsWallProjection(wall, envWall)) continue;
 
         // Check if the new wall is on the external face side of the envelope wall
         const envNormalDir = isH ? envWall.n.y : envWall.n.x;

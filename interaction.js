@@ -852,7 +852,8 @@ function onKeyDown(e) {
                 thickness, 2700, null, state.currentFloorId
             );
             const restriction = sim.isWallInRestrictedZone(flippedWall);
-            if (!restriction.restricted) {
+            const wouldFaceEnvelope = sim.shouldFlipAwayFromEnvelope(flippedWall);
+            if (!restriction.restricted && !wouldFaceEnvelope) {
                 wallFlipped = !wallFlipped;
                 manualFlip = true;
             }

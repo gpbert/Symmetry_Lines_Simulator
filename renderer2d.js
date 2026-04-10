@@ -165,13 +165,31 @@ function drawRestrictedZones(skipIndices = new Set()) {
             const minDist = (inEnvelope && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
             if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
 
+            // For 1200mm envelope lines, clip to the envelope wall's length projection
+            const isEnvelopeLine = inEnvelope && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
+            let lineStart, lineEnd;
+            if (isEnvelopeLine) {
+                // Clip to wall extent
+                if (isHorizontal) {
+                    lineStart = Math.min(wall.pointA.x, wall.pointB.x);
+                    lineEnd = Math.max(wall.pointA.x, wall.pointB.x);
+                } else {
+                    lineStart = Math.min(wall.pointA.y, wall.pointB.y);
+                    lineEnd = Math.max(wall.pointA.y, wall.pointB.y);
+                }
+            }
+
             ctx.beginPath();
             if (isHorizontal) {
-                ctx.moveTo(mmToPx(infiniteLeft), mmToPx(g));
-                ctx.lineTo(mmToPx(infiniteRight), mmToPx(g));
+                const x1 = isEnvelopeLine ? mmToPx(lineStart) : mmToPx(infiniteLeft);
+                const x2 = isEnvelopeLine ? mmToPx(lineEnd) : mmToPx(infiniteRight);
+                ctx.moveTo(x1, mmToPx(g));
+                ctx.lineTo(x2, mmToPx(g));
             } else {
-                ctx.moveTo(mmToPx(g), mmToPx(infiniteTop));
-                ctx.lineTo(mmToPx(g), mmToPx(infiniteBottom));
+                const y1 = isEnvelopeLine ? mmToPx(lineStart) : mmToPx(infiniteTop);
+                const y2 = isEnvelopeLine ? mmToPx(lineEnd) : mmToPx(infiniteBottom);
+                ctx.moveTo(mmToPx(g), y1);
+                ctx.lineTo(mmToPx(g), y2);
             }
             ctx.stroke();
         }
