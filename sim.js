@@ -1879,6 +1879,8 @@ export function envelopeWallHasExtension(envWall) {
         if (wall === envWall) continue;
         if (Math.abs(wall.floorId - envWall.floorId) > 1) continue;
         if (!wall.isPerpendicularTo(envWall)) continue;
+        // Skip other envelope boundary walls — they're corners, not extensions
+        if (isWallInEnvelope(wall)) continue;
         // Check if any endpoint of the perpendicular wall touches the envelope wall
         if (envWall.containsPoint(wall.pointA.x, wall.pointA.y, TOLERANCE)) return true;
         if (envWall.containsPoint(wall.pointB.x, wall.pointB.y, TOLERANCE)) return true;
