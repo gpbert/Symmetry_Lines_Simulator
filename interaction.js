@@ -134,8 +134,7 @@ function onMouseDown(e) {
                 x: sim.snapToGrid(pos.x, gridSize),
                 y: sim.snapToGrid(pos.y, gridSize)
             };
-            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId)
-                || sim.isPointAtEnvelopeEndpoint(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
+            isDrawingFromEnvelope = sim.isPointOnEnvelopeExtension(snappedForCheck.x, snappedForCheck.y, state.currentFloorId);
 
             // Re-snap to the correct grid (screenToWorld uses 100mm, external walls need 300mm)
             const snappedX = sim.snapToGrid(pos.x, gridSize);
@@ -547,9 +546,9 @@ function onMouseMove(e) {
         const snappedX = sim.snapToGrid(pos.x, hoverGridSize);
         const snappedY = sim.snapToGrid(pos.y, hoverGridSize);
         let nudged;
-        const hoverAtEnvEndpoint = sim.isPointAtEnvelopeEndpoint(snappedX, snappedY, state.currentFloorId);
-        if (hoverEnvelope || hoverAtEnvEndpoint) {
-            // Inside envelope or at envelope endpoint: free placement, no nudging
+        const hoverAtExtension = sim.isPointOnEnvelopeExtension(snappedX, snappedY, state.currentFloorId);
+        if (hoverEnvelope || hoverAtExtension) {
+            // Inside envelope or at extension endpoint: free placement, no nudging
             nudged = { x: snappedX, y: snappedY };
         } else {
             nudged = sim.nudgeStartPointOutOfZones(snappedX, snappedY, state.currentFloorId, hoverGridSize);
