@@ -1804,6 +1804,7 @@ export function getEnvelopeProximityShift(startX, startY, endX, endY, floorId) {
 
     for (const envWall of state.walls) {
         if (!isWallInEnvelope(envWall)) continue;
+        if (envelopeWallHasExtension(envWall)) continue; // extension exists — no shift
         if (Math.abs(envWall.floorId - floorId) > 1) continue;
 
         const envIsH = Math.abs(envWall.d.x) > Math.abs(envWall.d.y);
