@@ -187,4 +187,39 @@ test.describe('Partial Gridline Hiding', () => {
         expect(result.seg1min).toBe(6000);
         expect(result.seg1max).toBe(9000);
     });
+
+    test('unit: drawGrid completes without error using segment maps', async ({ page }) => {
+        const result = await page.evaluate(() => {
+            const sim = window.__sim;
+            const Wall = sim.Wall;
+            const renderer = window.__renderer2D;
+
+            sim.state.walls = [];
+            sim.state.buildingEnvelopes = [];
+            sim.state.returningWallOverrides.clear();
+
+            // Place wall to create restrictions
+            sim.state.walls.push(new Wall(0, 1800, 3000, 1800, 200, 2700, null, 0));
+            sim.updateBuildingEnvelopes();
+
+            // Trigger full draw (uses segment maps internally)
+            renderer.draw();
+
+            // If we get here, drawGrid handled segment maps correctly
+            const { restrictedY } = renderer.getRestrictedGridCoords(new Set());
+            const y2100segments = restrictedY.get(2100) || [];
+
+            return {
+                drawCompleted: true,
+                y2100hasSegments: y2100segments.length > 0,
+                y2100min: y2100segments.length > 0 ? y2100segments[0].min : null,
+                y2100max: y2100segments.length > 0 ? y2100segments[0].max : null,
+            };
+        });
+
+        expect(result.drawCompleted).toBe(true);
+        expect(result.y2100hasSegments).toBe(true);
+        expect(result.y2100min).toBe(0);
+        expect(result.y2100max).toBe(3000);
+    });
 });

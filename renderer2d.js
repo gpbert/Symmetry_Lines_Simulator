@@ -54,7 +54,7 @@ function pxSnapToGrid(px, gridSize = GRID_SIZE_EXTERNAL) {
 // ============================================================
 // Drawing helpers
 // ============================================================
-function drawGrid(restrictedX = new Set(), restrictedY = new Set()) {
+function drawGrid(restrictedX = new Map(), restrictedY = new Map()) {
     if (!ctx || !canvas) {
         console.error('Canvas not initialized in drawGrid!');
         return;
@@ -78,19 +78,75 @@ function drawGrid(restrictedX = new Set(), restrictedY = new Set()) {
     // Draw 300mm grid (external) - DARK, thicker lines
     ctx.strokeStyle = '#999999';
     ctx.lineWidth = 2 / zoomLevel;
+
+    // Vertical lines (x = constant, line runs top→bottom)
     for (let x = startX; x <= endX; x += gridStepExternal) {
-        if (restrictedX.has(Math.round(pxToMm(x)))) continue;
-        ctx.beginPath();
-        ctx.moveTo(x, visibleTop);
-        ctx.lineTo(x, visibleBottom);
-        ctx.stroke();
+        const xMm = Math.round(pxToMm(x));
+        const segments = restrictedX.get(xMm);
+        if (!segments) {
+            // No restrictions — draw full line
+            ctx.beginPath();
+            ctx.moveTo(x, visibleTop);
+            ctx.lineTo(x, visibleBottom);
+            ctx.stroke();
+        } else {
+            // Draw gaps around restricted segments
+            // Segments are {min, max} in mm along Y axis
+            const sorted = segments.slice().sort((a, b) => a.min - b.min);
+            let cursor = visibleTop;
+            for (const seg of sorted) {
+                const segTopPx = mmToPx(seg.min);
+                const segBottomPx = mmToPx(seg.max);
+                if (cursor < segTopPx) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, cursor);
+                    ctx.lineTo(x, segTopPx);
+                    ctx.stroke();
+                }
+                cursor = Math.max(cursor, segBottomPx);
+            }
+            if (cursor < visibleBottom) {
+                ctx.beginPath();
+                ctx.moveTo(x, cursor);
+                ctx.lineTo(x, visibleBottom);
+                ctx.stroke();
+            }
+        }
     }
+
+    // Horizontal lines (y = constant, line runs left→right)
     for (let y = startY; y <= endY; y += gridStepExternal) {
-        if (restrictedY.has(Math.round(pxToMm(y)))) continue;
-        ctx.beginPath();
-        ctx.moveTo(visibleLeft, y);
-        ctx.lineTo(visibleRight, y);
-        ctx.stroke();
+        const yMm = Math.round(pxToMm(y));
+        const segments = restrictedY.get(yMm);
+        if (!segments) {
+            // No restrictions — draw full line
+            ctx.beginPath();
+            ctx.moveTo(visibleLeft, y);
+            ctx.lineTo(visibleRight, y);
+            ctx.stroke();
+        } else {
+            // Draw gaps around restricted segments
+            // Segments are {min, max} in mm along X axis
+            const sorted = segments.slice().sort((a, b) => a.min - b.min);
+            let cursor = visibleLeft;
+            for (const seg of sorted) {
+                const segLeftPx = mmToPx(seg.min);
+                const segRightPx = mmToPx(seg.max);
+                if (cursor < segLeftPx) {
+                    ctx.beginPath();
+                    ctx.moveTo(cursor, y);
+                    ctx.lineTo(segLeftPx, y);
+                    ctx.stroke();
+                }
+                cursor = Math.max(cursor, segRightPx);
+            }
+            if (cursor < visibleRight) {
+                ctx.beginPath();
+                ctx.moveTo(cursor, y);
+                ctx.lineTo(visibleRight, y);
+                ctx.stroke();
+            }
+        }
     }
 
     // Draw 100mm grid (internal) - lighter lines
