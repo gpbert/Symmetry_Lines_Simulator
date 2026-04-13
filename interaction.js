@@ -60,6 +60,55 @@ export const interactionState = {
 };
 
 // ============================================================
+// Helpers
+// ============================================================
+
+// Shrink a wall endpoint to avoid body-level restriction zone overlaps.
+// Returns the adjusted endpoint (or the original if no shrinking needed).
+function shrinkToAvoidRestriction(startPt, endPt, lengthGrid) {
+    const shiftX = startPt._shiftX || 0;
+    const shiftY = startPt._shiftY || 0;
+    const thickness = parseInt(document.getElementById('wallThickness').value);
+    const isHorizontal = Math.abs(endPt.x - startPt.x) > Math.abs(endPt.y - startPt.y);
+    const direction = isHorizontal
+        ? (endPt.x > startPt.x ? 1 : -1)
+        : (endPt.y > startPt.y ? 1 : -1);
+
+    const fullWall = new Wall(
+        startPt.x + shiftX, startPt.y + shiftY,
+        endPt.x + shiftX, endPt.y + shiftY,
+        thickness, 2700, null, state.currentFloorId
+    );
+    const restriction = sim.isWallInRestrictedZone(fullWall);
+
+    if (!restriction.restricted || !restriction.wall || !fullWall.overlapsInProjection(restriction.wall)) {
+        return endPt;
+    }
+
+    let currentLength = isHorizontal
+        ? Math.abs(endPt.x - startPt.x)
+        : Math.abs(endPt.y - startPt.y);
+
+    currentLength -= lengthGrid;
+    while (currentLength >= MIN_WALL_LENGTH) {
+        const testEnd = isHorizontal
+            ? { x: startPt.x + direction * currentLength, y: startPt.y }
+            : { x: startPt.x, y: startPt.y + direction * currentLength };
+        const testWall = new Wall(
+            startPt.x + shiftX, startPt.y + shiftY,
+            testEnd.x + shiftX, testEnd.y + shiftY,
+            thickness, 2700, null, state.currentFloorId
+        );
+        const testRestriction = sim.isWallInRestrictedZone(testWall);
+        if (!testRestriction.restricted || !testWall.overlapsInProjection(testRestriction.wall)) {
+            return testEnd;
+        }
+        currentLength -= lengthGrid;
+    }
+    return { x: startPt.x, y: startPt.y };
+}
+
+// ============================================================
 // Init
 // ============================================================
 export function initInteraction(rendererGetter, opts) {
@@ -178,6 +227,11 @@ function onMouseDown(e) {
             const placementLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
             const skipEnvelopeZoneOnPlace = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
             finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, skipEnvelopeZoneOnPlace);
+
+            // When restriction error feedback is OFF, shrink to avoid restricted zones
+            if (finalPos && !state.featureToggles?.restrictionErrorFeedback && !isDrawingInternalWall) {
+                finalPos = shrinkToAvoidRestriction(drawingWall, finalPos, placementLengthGrid);
+            }
 
             // Apply envelope proximity shift if present
             const shiftX = drawingWall._shiftX || 0;
@@ -774,52 +828,7 @@ function onMouseMove(e) {
         // When restriction error feedback is OFF, shrink preview to avoid restricted zones
         // (snapLengthToGrid only checks endpoints, but the wall body can enter a zone)
         if (tempPoint && !state.featureToggles?.restrictionErrorFeedback && !isDrawingInternalWall) {
-            const shiftX = drawingWall._shiftX || 0;
-            const shiftY = drawingWall._shiftY || 0;
-            const thickness = parseInt(document.getElementById('wallThickness').value);
-            const isHorizontal = Math.abs(tempPoint.x - drawingWall.x) > Math.abs(tempPoint.y - drawingWall.y);
-            const direction = isHorizontal
-                ? (tempPoint.x > drawingWall.x ? 1 : -1)
-                : (tempPoint.y > drawingWall.y ? 1 : -1);
-            const lengthGrid = previewLengthGrid;
-
-            // Build the full-length wall to check
-            const fullWall = new Wall(
-                drawingWall.x + shiftX, drawingWall.y + shiftY,
-                tempPoint.x + shiftX, tempPoint.y + shiftY,
-                thickness, 2700, null, state.currentFloorId
-            );
-            const restriction = sim.isWallInRestrictedZone(fullWall);
-
-            // Only shrink if the wall is actually restricted AND overlaps the
-            // restricting wall's projection (avoids blocking walls that are just
-            // on the same gridline but outside the restricting wall's y/x range)
-            if (restriction.restricted && restriction.wall && fullWall.overlapsInProjection(restriction.wall)) {
-                let currentLength = isHorizontal
-                    ? Math.abs(tempPoint.x - drawingWall.x)
-                    : Math.abs(tempPoint.y - drawingWall.y);
-
-                currentLength -= lengthGrid;
-                while (currentLength >= MIN_WALL_LENGTH) {
-                    const testEnd = isHorizontal
-                        ? { x: drawingWall.x + direction * currentLength, y: drawingWall.y }
-                        : { x: drawingWall.x, y: drawingWall.y + direction * currentLength };
-                    const testWall = new Wall(
-                        drawingWall.x + shiftX, drawingWall.y + shiftY,
-                        testEnd.x + shiftX, testEnd.y + shiftY,
-                        thickness, 2700, null, state.currentFloorId
-                    );
-                    const testRestriction = sim.isWallInRestrictedZone(testWall);
-                    if (!testRestriction.restricted || !testWall.overlapsInProjection(testRestriction.wall)) {
-                        tempPoint = testEnd;
-                        break;
-                    }
-                    currentLength -= lengthGrid;
-                }
-                if (currentLength < MIN_WALL_LENGTH) {
-                    tempPoint = { x: drawingWall.x, y: drawingWall.y };
-                }
-            }
+            tempPoint = shrinkToAvoidRestriction(drawingWall, tempPoint, previewLengthGrid);
         }
 
         // Check if the wall should shift away from an envelope wall's projection
