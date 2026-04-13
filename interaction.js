@@ -306,7 +306,7 @@ function onMouseDown(e) {
                 }
 
                 const restriction = sim.isWallInRestrictedZone(newWall);
-                if (restriction.restricted) {
+                if (restriction.restricted && state.featureToggles?.restrictionErrorFeedback) {
                     let message = 'Cannot place wall here.';
                     if (restriction.zone.reason) {
                         message += ` ${restriction.zone.reason}`;
