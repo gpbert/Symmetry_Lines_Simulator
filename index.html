@@ -1082,12 +1082,15 @@
         const featureTogglesBtn = document.getElementById('featureTogglesBtn');
         const featureTogglesClose = document.getElementById('featureTogglesClose');
         const toggleEnvelopeShift = document.getElementById('toggleEnvelopeShift');
+        const toggleDynamicEnvelopeGridlines = document.getElementById('toggleDynamicEnvelopeGridlines');
 
         // Load saved toggle states from localStorage
         state.featureToggles = {
             envelopeShift: localStorage.getItem('ft_envelopeShift') === 'true',
+            dynamicEnvelopeGridlines: localStorage.getItem('ft_dynamicEnvelopeGridlines') === 'true',
         };
         toggleEnvelopeShift.checked = state.featureToggles.envelopeShift;
+        toggleDynamicEnvelopeGridlines.checked = state.featureToggles.dynamicEnvelopeGridlines;
 
         featureTogglesBtn.addEventListener('click', () => {
             featureTogglesModal.classList.add('show');
@@ -1101,6 +1104,10 @@
         toggleEnvelopeShift.addEventListener('change', (e) => {
             state.featureToggles.envelopeShift = e.target.checked;
             localStorage.setItem('ft_envelopeShift', e.target.checked);
+        });
+        toggleDynamicEnvelopeGridlines.addEventListener('change', (e) => {
+            state.featureToggles.dynamicEnvelopeGridlines = e.target.checked;
+            localStorage.setItem('ft_dynamicEnvelopeGridlines', e.target.checked);
         });
 
         // Rules Modal
@@ -1388,6 +1395,16 @@
                     </div>
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggleEnvelopeShift">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Predict envelope layout changes</div>
+                        <div class="toggle-desc">When enabled, gridlines update dynamically as you draw from an envelope wall, anticipating that the extension will change the restriction zones (1200mm → 600mm).</div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggleDynamicEnvelopeGridlines">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>

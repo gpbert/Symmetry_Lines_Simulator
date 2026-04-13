@@ -206,7 +206,13 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
         const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
         const normalDir = isHorizontal ? wall.n.y : wall.n.x;
         const inEnvelope = sim.isWallInEnvelope(wall);
-        const hasExtension = inEnvelope && sim.envelopeWallHasExtension(wall);
+        // Treat wall as having an extension if user is currently drawing from it
+        // (suppresses 1200mm → 600mm, matching snapping behavior)
+        const drawingFromThis = state.featureToggles?.dynamicEnvelopeGridlines
+            && inEnvelope && _interactionState.isDrawingFromEnvelope
+            && _interactionState.drawingWall
+            && wall.containsPoint(_interactionState.drawingWall.x, _interactionState.drawingWall.y, 15);
+        const hasExtension = inEnvelope && (sim.envelopeWallHasExtension(wall) || drawingFromThis);
 
         // Wall projection bounds along its length axis
         const wallMin = isHorizontal
