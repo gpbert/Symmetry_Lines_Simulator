@@ -836,7 +836,8 @@ function draw() {
         );
 
         // Draw dynamic restriction zones for nearby walls on DIFFERENT grid lines
-        if (tempWall.length > 0) {
+        // Only when restriction error feedback toggle is ON
+        if (state.featureToggles?.restrictionErrorFeedback && tempWall.length > 0) {
             state.walls.forEach((existingWall, idx) => {
                 const floorDiff = Math.abs(existingWall.floorId - state.currentFloorId);
                 if (floorDiff > 1) return;
@@ -915,8 +916,9 @@ function draw() {
         // Check if on same grid line (will merge once overlapping — skip restriction)
         const onSameLine = sim.findAlignedExistingWall(tempWall);
 
-        // Check if wall is in restricted zone (skip if merging or on same grid line)
-        const restriction = (mergeTarget || onSameLine) ? { restricted: false } : sim.isWallInRestrictedZone(tempWall);
+        // Check if wall is in restricted zone (skip if merging, on same grid line, or toggle off)
+        const restriction = (mergeTarget || onSameLine || !state.featureToggles?.restrictionErrorFeedback)
+            ? { restricted: false } : sim.isWallInRestrictedZone(tempWall);
         const isRestricted = restriction.restricted;
         const isMerging = !!mergeTarget;
 
@@ -995,11 +997,20 @@ function draw() {
         }
 
         // Draw start and end points
-        ctx.fillStyle = isMerging ? '#2563eb' : isRestricted ? '#dc2626' : '#22c55e';
+        const pointColor = isMerging ? '#2563eb' : isRestricted ? '#dc2626' : '#22c55e';
+
+        // Start point — with black inner dot to differentiate from endpoint
+        ctx.fillStyle = pointColor;
         ctx.beginPath();
         ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 6, 0, Math.PI * 2);
         ctx.fill();
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(mmToPx(drawingWall.x), mmToPx(drawingWall.y), 2.5, 0, Math.PI * 2);
+        ctx.fill();
 
+        // End point
+        ctx.fillStyle = pointColor;
         ctx.beginPath();
         ctx.arc(mmToPx(tempPoint.x), mmToPx(tempPoint.y), 6, 0, Math.PI * 2);
         ctx.fill();

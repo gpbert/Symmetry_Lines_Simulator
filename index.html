@@ -1082,14 +1082,17 @@
         const featureTogglesBtn = document.getElementById('featureTogglesBtn');
         const featureTogglesClose = document.getElementById('featureTogglesClose');
         const toggleEnvelopeShift = document.getElementById('toggleEnvelopeShift');
+        const toggleRestrictionErrorFeedback = document.getElementById('toggleRestrictionErrorFeedback');
         const toggleDynamicEnvelopeGridlines = document.getElementById('toggleDynamicEnvelopeGridlines');
 
         // Load saved toggle states from localStorage
         state.featureToggles = {
             envelopeShift: localStorage.getItem('ft_envelopeShift') === 'true',
+            restrictionErrorFeedback: localStorage.getItem('ft_restrictionErrorFeedback') === 'true',
             dynamicEnvelopeGridlines: localStorage.getItem('ft_dynamicEnvelopeGridlines') === 'true',
         };
         toggleEnvelopeShift.checked = state.featureToggles.envelopeShift;
+        toggleRestrictionErrorFeedback.checked = state.featureToggles.restrictionErrorFeedback;
         toggleDynamicEnvelopeGridlines.checked = state.featureToggles.dynamicEnvelopeGridlines;
 
         featureTogglesBtn.addEventListener('click', () => {
@@ -1104,6 +1107,10 @@
         toggleEnvelopeShift.addEventListener('change', (e) => {
             state.featureToggles.envelopeShift = e.target.checked;
             localStorage.setItem('ft_envelopeShift', e.target.checked);
+        });
+        toggleRestrictionErrorFeedback.addEventListener('change', (e) => {
+            state.featureToggles.restrictionErrorFeedback = e.target.checked;
+            localStorage.setItem('ft_restrictionErrorFeedback', e.target.checked);
         });
         toggleDynamicEnvelopeGridlines.addEventListener('change', (e) => {
             state.featureToggles.dynamicEnvelopeGridlines = e.target.checked;
@@ -1395,6 +1402,16 @@
                     </div>
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggleEnvelopeShift">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-row">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Show restriction error feedback</div>
+                        <div class="toggle-desc">When enabled, walls drawn into restriction zones turn red with an error message. When disabled, the wall preview silently stops at the last valid position.</div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggleRestrictionErrorFeedback">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
