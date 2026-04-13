@@ -783,29 +783,42 @@ function onMouseMove(e) {
                 : (tempPoint.y > drawingWall.y ? 1 : -1);
             const lengthGrid = previewLengthGrid;
 
-            // Try current length, then shrink by grid increments until valid
-            let currentLength = isHorizontal
-                ? Math.abs(tempPoint.x - drawingWall.x)
-                : Math.abs(tempPoint.y - drawingWall.y);
+            // Build the full-length wall to check
+            const fullWall = new Wall(
+                drawingWall.x + shiftX, drawingWall.y + shiftY,
+                tempPoint.x + shiftX, tempPoint.y + shiftY,
+                thickness, 2700, null, state.currentFloorId
+            );
+            const restriction = sim.isWallInRestrictedZone(fullWall);
 
-            while (currentLength >= MIN_WALL_LENGTH) {
-                const testEnd = isHorizontal
-                    ? { x: drawingWall.x + direction * currentLength, y: drawingWall.y }
-                    : { x: drawingWall.x, y: drawingWall.y + direction * currentLength };
-                const testWall = new Wall(
-                    drawingWall.x + shiftX, drawingWall.y + shiftY,
-                    testEnd.x + shiftX, testEnd.y + shiftY,
-                    thickness, 2700, null, state.currentFloorId
-                );
-                const restriction = sim.isWallInRestrictedZone(testWall);
-                if (!restriction.restricted) {
-                    tempPoint = testEnd;
-                    break;
-                }
+            // Only shrink if the wall is actually restricted AND overlaps the
+            // restricting wall's projection (avoids blocking walls that are just
+            // on the same gridline but outside the restricting wall's y/x range)
+            if (restriction.restricted && restriction.wall && fullWall.overlapsInProjection(restriction.wall)) {
+                let currentLength = isHorizontal
+                    ? Math.abs(tempPoint.x - drawingWall.x)
+                    : Math.abs(tempPoint.y - drawingWall.y);
+
                 currentLength -= lengthGrid;
-            }
-            if (currentLength < MIN_WALL_LENGTH) {
-                tempPoint = { x: drawingWall.x, y: drawingWall.y };
+                while (currentLength >= MIN_WALL_LENGTH) {
+                    const testEnd = isHorizontal
+                        ? { x: drawingWall.x + direction * currentLength, y: drawingWall.y }
+                        : { x: drawingWall.x, y: drawingWall.y + direction * currentLength };
+                    const testWall = new Wall(
+                        drawingWall.x + shiftX, drawingWall.y + shiftY,
+                        testEnd.x + shiftX, testEnd.y + shiftY,
+                        thickness, 2700, null, state.currentFloorId
+                    );
+                    const testRestriction = sim.isWallInRestrictedZone(testWall);
+                    if (!testRestriction.restricted || !testWall.overlapsInProjection(testRestriction.wall)) {
+                        tempPoint = testEnd;
+                        break;
+                    }
+                    currentLength -= lengthGrid;
+                }
+                if (currentLength < MIN_WALL_LENGTH) {
+                    tempPoint = { x: drawingWall.x, y: drawingWall.y };
+                }
             }
         }
 
