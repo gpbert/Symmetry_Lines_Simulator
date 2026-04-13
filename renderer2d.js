@@ -119,8 +119,8 @@ function drawGrid(restrictedX = new Set(), restrictedY = new Set()) {
 }
 
 function getRestrictedGridCoords(skipIndices = new Set()) {
-    const restrictedX = new Set();
-    const restrictedY = new Set();
+    const restrictedX = new Map(); // x-coord → [{min, max}] (y-ranges)
+    const restrictedY = new Map(); // y-coord → [{min, max}] (x-ranges)
 
     const relevantWalls = state.walls.filter((w, idx) =>
         !skipIndices.has(idx) && (
@@ -140,6 +140,14 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
         const inEnvelope = sim.isWallInEnvelope(wall);
         const hasExtension = inEnvelope && sim.envelopeWallHasExtension(wall);
 
+        // Wall projection bounds along its length axis
+        const wallMin = isHorizontal
+            ? Math.min(wall.pointA.x, wall.pointB.x)
+            : Math.min(wall.pointA.y, wall.pointB.y);
+        const wallMax = isHorizontal
+            ? Math.max(wall.pointA.x, wall.pointB.x)
+            : Math.max(wall.pointA.y, wall.pointB.y);
+
         const use1200 = inEnvelope && !hasExtension;
         const zoneNeg = internalFace - ((use1200 && normalDir < 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
         const zonePos = internalFace + ((use1200 && normalDir > 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
@@ -153,11 +161,9 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
             const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
             if (dist >= minDist - 2) continue;
 
-            if (isHorizontal) {
-                restrictedY.add(g);
-            } else {
-                restrictedX.add(g);
-            }
+            const map = isHorizontal ? restrictedY : restrictedX;
+            if (!map.has(g)) map.set(g, []);
+            map.get(g).push({ min: wallMin, max: wallMax });
         }
     });
 

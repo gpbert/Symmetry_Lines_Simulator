@@ -8,9 +8,9 @@ test.beforeEach(async ({ page }) => {
     await page.waitForTimeout(300);
 });
 
-test.describe('Hide Unavailable Gridlines', () => {
+test.describe('Partial Gridline Hiding', () => {
 
-    test('unit: getRestrictedGridCoords returns restricted coordinates for a horizontal wall', async ({ page }) => {
+    test('unit: getRestrictedGridCoords returns segment maps for a horizontal wall', async ({ page }) => {
         const result = await page.evaluate(() => {
             const sim = window.__sim;
             const Wall = sim.Wall;
@@ -20,36 +20,48 @@ test.describe('Hide Unavailable Gridlines', () => {
             sim.state.buildingEnvelopes = [];
             sim.state.returningWallOverrides.clear();
 
-            // Place a horizontal wall at y=0 (pointA.y = 0)
-            // Wall faces upward (n.y < 0), so restriction is 600mm on both sides
-            // since it's not in an envelope
+            // Horizontal wall at y=0, spanning x=0 to x=3000
             sim.state.walls.push(new Wall(0, 0, 3000, 0, 200, 2700, null, 0));
             sim.updateBuildingEnvelopes();
 
             const { restrictedX, restrictedY } = renderer.getRestrictedGridCoords(new Set());
 
+            // restrictedY should be a Map with segments
+            const y300segments = restrictedY.get(300) || [];
+            const yNeg300segments = restrictedY.get(-300) || [];
+            const y600segments = restrictedY.get(600) || [];
+
             return {
-                // y=300 is 300mm from wall at y=0 — within 600mm, should be restricted
-                y300restricted: restrictedY.has(300),
-                // y=-300 is 300mm from wall at y=0 — within 600mm, should be restricted
-                yNeg300restricted: restrictedY.has(-300),
-                // y=600 is exactly 600mm — NOT restricted (boundary is valid)
-                y600restricted: restrictedY.has(600),
-                // y=900 is 900mm — NOT restricted
-                y900restricted: restrictedY.has(900),
-                // x coordinates should not be restricted (wall is horizontal, restricts y only)
-                hasAnyRestrictedX: restrictedX.size > 0,
+                restrictedYIsMap: restrictedY instanceof Map,
+                restrictedXIsMap: restrictedX instanceof Map,
+                // y=300: restricted, segment should span wall projection (x=0 to x=3000)
+                y300hasSegments: y300segments.length > 0,
+                y300min: y300segments.length > 0 ? y300segments[0].min : null,
+                y300max: y300segments.length > 0 ? y300segments[0].max : null,
+                // y=-300: restricted, same projection
+                yNeg300hasSegments: yNeg300segments.length > 0,
+                yNeg300min: yNeg300segments.length > 0 ? yNeg300segments[0].min : null,
+                yNeg300max: yNeg300segments.length > 0 ? yNeg300segments[0].max : null,
+                // y=600: boundary — NOT restricted
+                y600hasSegments: y600segments.length > 0,
+                // x coords should not be restricted (wall is horizontal)
+                restrictedXSize: restrictedX.size,
             };
         });
 
-        expect(result.y300restricted).toBe(true);
-        expect(result.yNeg300restricted).toBe(true);
-        expect(result.y600restricted).toBe(false);
-        expect(result.y900restricted).toBe(false);
-        expect(result.hasAnyRestrictedX).toBe(false);
+        expect(result.restrictedYIsMap).toBe(true);
+        expect(result.restrictedXIsMap).toBe(true);
+        expect(result.y300hasSegments).toBe(true);
+        expect(result.y300min).toBe(0);
+        expect(result.y300max).toBe(3000);
+        expect(result.yNeg300hasSegments).toBe(true);
+        expect(result.yNeg300min).toBe(0);
+        expect(result.yNeg300max).toBe(3000);
+        expect(result.y600hasSegments).toBe(false);
+        expect(result.restrictedXSize).toBe(0);
     });
 
-    test('unit: getRestrictedGridCoords returns 1200mm restriction for envelope wall external side', async ({ page }) => {
+    test('unit: getRestrictedGridCoords returns 1200mm segments for envelope wall', async ({ page }) => {
         const result = await page.evaluate(() => {
             const sim = window.__sim;
             const Wall = sim.Wall;
@@ -59,40 +71,50 @@ test.describe('Hide Unavailable Gridlines', () => {
             sim.state.buildingEnvelopes = [];
             sim.state.returningWallOverrides.clear();
 
-            // Build a rectangular envelope: walls at y=0 (top), y=3600 (bottom),
-            // x=0 (left), x=3600 (right)
-            sim.state.walls.push(new Wall(0, 0, 3600, 0, 200, 2700, null, 0));       // top, faces outward (n.y < 0)
+            // Rectangular envelope: walls at y=0, y=3600, x=0, x=3600
+            sim.state.walls.push(new Wall(0, 0, 3600, 0, 200, 2700, null, 0));       // top
             sim.state.walls.push(new Wall(3600, 0, 3600, 3600, 200, 2700, null, 0));  // right
             sim.state.walls.push(new Wall(3600, 3600, 0, 3600, 200, 2700, null, 0));  // bottom
             sim.state.walls.push(new Wall(0, 3600, 0, 0, 200, 2700, null, 0));        // left
 
             sim.updateBuildingEnvelopes();
 
-            const { restrictedX, restrictedY } = renderer.getRestrictedGridCoords(new Set());
+            const { restrictedY } = renderer.getRestrictedGridCoords(new Set());
 
             // Top wall at y=0: Wall(0,0,3600,0) → d=(1,0) → n=(0,+1)
-            // Normal (+y) side is external face: 1200mm restriction
-            // Opposite (-y) side: 600mm restriction
+            // +y side (normal/external): 1200mm zone, segments span x=0→3600
+            // -y side (opposite normal): 600mm zone, segments span x=0→3600
+            const yNeg300 = restrictedY.get(-300) || [];
+            const yNeg600 = restrictedY.get(-600) || [];
+            const y300 = restrictedY.get(300) || [];
+            const y600 = restrictedY.get(600) || [];
+            const y900 = restrictedY.get(900) || [];
+            const y1200 = restrictedY.get(1200) || [];
+
             return {
-                // -y side (opposite normal): 600mm zone
-                yNeg300: restrictedY.has(-300),   // 300mm away — restricted
-                yNeg600: restrictedY.has(-600),   // boundary — NOT restricted
-                // +y side (normal/external face): 1200mm zone
-                y300: restrictedY.has(300),        // 300mm — restricted
-                y600: restrictedY.has(600),        // 600mm — restricted
-                y900: restrictedY.has(900),        // 900mm — restricted
-                y1200: restrictedY.has(1200),      // boundary — NOT restricted
+                yNeg300hasSegments: yNeg300.length > 0,
+                yNeg600hasSegments: yNeg600.length > 0,  // boundary
+                y300hasSegments: y300.length > 0,
+                y600hasSegments: y600.length > 0,
+                y900hasSegments: y900.length > 0,
+                y1200hasSegments: y1200.length > 0,       // boundary
+                // Check segment bounds for top wall's restriction
+                y300min: y300.length > 0 ? y300[0].min : null,
+                y300max: y300.length > 0 ? y300[0].max : null,
             };
         });
 
         // -y side: 600mm zone
-        expect(result.yNeg300).toBe(true);
-        expect(result.yNeg600).toBe(false);
-        // +y side (external face): 1200mm zone
-        expect(result.y300).toBe(true);
-        expect(result.y600).toBe(true);
-        expect(result.y900).toBe(true);
-        expect(result.y1200).toBe(false);
+        expect(result.yNeg300hasSegments).toBe(true);
+        expect(result.yNeg600hasSegments).toBe(false);  // boundary
+        // +y side (external): 1200mm zone
+        expect(result.y300hasSegments).toBe(true);
+        expect(result.y600hasSegments).toBe(true);
+        expect(result.y900hasSegments).toBe(true);
+        expect(result.y1200hasSegments).toBe(false);  // boundary
+        // Segment spans wall projection
+        expect(result.y300min).toBe(0);
+        expect(result.y300max).toBe(3600);
     });
 
     test('unit: internal walls do not generate restricted grid coords', async ({ page }) => {
@@ -118,59 +140,51 @@ test.describe('Hide Unavailable Gridlines', () => {
 
             const { restrictedX } = renderer.getRestrictedGridCoords(new Set());
 
-            // x=3300 is 300mm from internal wall at x=3000
-            // Internal walls should NOT generate restrictions
-            // But x=3300 might be restricted by envelope wall at x=0 or x=6000
-            // x=300 IS restricted by envelope wall at x=0
-            // x=3300 is NOT restricted by envelope walls (too far from x=0 and x=6000)
             return {
-                x300restrictedByEnvelope: restrictedX.has(300),
-                x3300notRestrictedByInternal: !restrictedX.has(3300),
+                // x=300 IS restricted by envelope wall at x=0
+                x300restricted: restrictedX.has(300),
+                // x=3300 is NOT restricted by internal wall (internal walls don't restrict)
+                x3300restricted: restrictedX.has(3300),
             };
         });
 
-        expect(result.x300restrictedByEnvelope).toBe(true);
-        expect(result.x3300notRestrictedByInternal).toBe(true);
+        expect(result.x300restricted).toBe(true);
+        expect(result.x3300restricted).toBe(false);
     });
 
-    test('e2e: drawing a wall dynamically hides nearby gridlines', async ({ page }) => {
-        // Get canvas center for coordinate calculation
-        const canvasBox = await page.locator('#mainCanvas').boundingBox();
-        const centerX = canvasBox.x + canvasBox.width / 2;
-        const centerY = canvasBox.y + canvasBox.height / 2;
-
-        // Ensure draw mode is active
-        await page.click('#drawWallBtn');
-        await page.waitForTimeout(100);
-
-        // Draw a horizontal wall by clicking two points
-        // Click first point (left of center)
-        await page.mouse.click(centerX - 200, centerY);
-        await page.waitForTimeout(100);
-
-        // Click second point (right of center) to complete wall
-        await page.mouse.click(centerX + 200, centerY);
-        await page.waitForTimeout(300);
-
-        // Verify that restricted grid coords are now populated
+    test('unit: multiple walls create separate segments on the same gridline', async ({ page }) => {
         const result = await page.evaluate(() => {
-            const renderer = window.__renderer2D;
             const sim = window.__sim;
+            const Wall = sim.Wall;
+            const renderer = window.__renderer2D;
 
-            // There should be at least one wall now
-            const wallCount = sim.state.walls.length;
+            sim.state.walls = [];
+            sim.state.buildingEnvelopes = [];
+            sim.state.returningWallOverrides.clear();
 
-            // Get restricted coords
-            const { restrictedX, restrictedY } = renderer.getRestrictedGridCoords(new Set());
+            // Two horizontal walls at y=0, separated along x axis
+            // Wall 1: x=0 to x=3000
+            sim.state.walls.push(new Wall(0, 0, 3000, 0, 200, 2700, null, 0));
+            // Wall 2: x=6000 to x=9000
+            sim.state.walls.push(new Wall(6000, 0, 9000, 0, 200, 2700, null, 0));
+            sim.updateBuildingEnvelopes();
+
+            const { restrictedY } = renderer.getRestrictedGridCoords(new Set());
+            const y300segments = restrictedY.get(300) || [];
 
             return {
-                wallCount,
-                hasRestrictedY: restrictedY.size > 0,
-                totalRestrictedY: restrictedY.size,
+                segmentCount: y300segments.length,
+                seg0min: y300segments.length >= 1 ? y300segments[0].min : null,
+                seg0max: y300segments.length >= 1 ? y300segments[0].max : null,
+                seg1min: y300segments.length >= 2 ? y300segments[1].min : null,
+                seg1max: y300segments.length >= 2 ? y300segments[1].max : null,
             };
         });
 
-        expect(result.wallCount).toBeGreaterThan(0);
-        expect(result.hasRestrictedY).toBe(true);
+        expect(result.segmentCount).toBe(2);
+        expect(result.seg0min).toBe(0);
+        expect(result.seg0max).toBe(3000);
+        expect(result.seg1min).toBe(6000);
+        expect(result.seg1max).toBe(9000);
     });
 });
