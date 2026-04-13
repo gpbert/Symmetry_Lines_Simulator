@@ -167,14 +167,16 @@ function drawGrid(restrictedX = new Map(), restrictedY = new Map()) {
     const endYInternal = Math.ceil(visibleBottom / gridStepInternal) * gridStepInternal;
 
     for (let x = startXInternal; x <= endXInternal; x += gridStepInternal) {
-        if (Math.abs(x % gridStepExternal) < 0.5) continue;
+        // Skip 100mm lines that coincide with visible 300mm lines
+        // (but draw them if the 300mm line is hidden by a restriction)
+        if (Math.abs(x % gridStepExternal) < 0.5 && !restrictedX.has(Math.round(pxToMm(x)))) continue;
         ctx.beginPath();
         ctx.moveTo(x, visibleTop);
         ctx.lineTo(x, visibleBottom);
         ctx.stroke();
     }
     for (let y = startYInternal; y <= endYInternal; y += gridStepInternal) {
-        if (Math.abs(y % gridStepExternal) < 0.5) continue;
+        if (Math.abs(y % gridStepExternal) < 0.5 && !restrictedY.has(Math.round(pxToMm(y)))) continue;
         ctx.beginPath();
         ctx.moveTo(visibleLeft, y);
         ctx.lineTo(visibleRight, y);
