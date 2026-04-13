@@ -828,9 +828,9 @@ function onMouseMove(e) {
         const skipEnvelopeZone = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, skipEnvelopeZone);
 
-        // When restriction error feedback is OFF, shrink preview to avoid restricted zones
+        // Always shrink preview to avoid restricted zones
         // (snapLengthToGrid only checks endpoints, but the wall body can enter a zone)
-        if (tempPoint && !state.featureToggles?.restrictionErrorFeedback && !isDrawingInternalWall) {
+        if (tempPoint && !isDrawingInternalWall) {
             tempPoint = shrinkToAvoidRestriction(drawingWall, tempPoint, previewLengthGrid);
         }
 
