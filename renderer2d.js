@@ -915,34 +915,33 @@ function draw() {
 
                 if (dist >= requiredDistance - 2) return;
 
-                // Render the restriction zone
+                // Render the restriction zone — clipped to the existing wall's projection
                 restrictingWalls.add(idx);
                 ctx.fillStyle = 'rgba(220, 38, 38, 0.12)';
 
                 const isHorizontal = Math.abs(existingWall.d.y) < Math.abs(existingWall.d.x);
-                const visLeft = (-panOffset.x) / zoomLevel;
-                const visTop = (-panOffset.y) / zoomLevel;
-                const visRight = (canvas.width - panOffset.x) / zoomLevel;
-                const visBottom = (canvas.height - panOffset.y) / zoomLevel;
-                const m = 100000;
 
                 if (isHorizontal) {
                     const internalY = existingWall.pointA.y;
+                    const wallMinX = Math.min(existingWall.pointA.x, existingWall.pointB.x);
+                    const wallMaxX = Math.max(existingWall.pointA.x, existingWall.pointB.x);
                     if (previewMidY > internalY) {
-                        ctx.fillRect(mmToPx(pxToMm(visLeft - m)), mmToPx(internalY),
-                            mmToPx(pxToMm(visRight - visLeft + 2 * m)), mmToPx(requiredDistance));
+                        ctx.fillRect(mmToPx(wallMinX), mmToPx(internalY),
+                            mmToPx(wallMaxX - wallMinX), mmToPx(requiredDistance));
                     } else {
-                        ctx.fillRect(mmToPx(pxToMm(visLeft - m)), mmToPx(internalY - requiredDistance),
-                            mmToPx(pxToMm(visRight - visLeft + 2 * m)), mmToPx(requiredDistance));
+                        ctx.fillRect(mmToPx(wallMinX), mmToPx(internalY - requiredDistance),
+                            mmToPx(wallMaxX - wallMinX), mmToPx(requiredDistance));
                     }
                 } else {
                     const internalX = existingWall.pointA.x;
+                    const wallMinY = Math.min(existingWall.pointA.y, existingWall.pointB.y);
+                    const wallMaxY = Math.max(existingWall.pointA.y, existingWall.pointB.y);
                     if (previewMidX > internalX) {
-                        ctx.fillRect(mmToPx(internalX), mmToPx(pxToMm(visTop - m)),
-                            mmToPx(requiredDistance), mmToPx(pxToMm(visBottom - visTop + 2 * m)));
+                        ctx.fillRect(mmToPx(internalX), mmToPx(wallMinY),
+                            mmToPx(requiredDistance), mmToPx(wallMaxY - wallMinY));
                     } else {
-                        ctx.fillRect(mmToPx(internalX - requiredDistance), mmToPx(pxToMm(visTop - m)),
-                            mmToPx(requiredDistance), mmToPx(pxToMm(visBottom - visTop + 2 * m)));
+                        ctx.fillRect(mmToPx(internalX - requiredDistance), mmToPx(wallMinY),
+                            mmToPx(requiredDistance), mmToPx(wallMaxY - wallMinY));
                     }
                 }
             });
