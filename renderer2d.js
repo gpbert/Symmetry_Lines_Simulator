@@ -226,7 +226,7 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
     return { restrictedX, restrictedY };
 }
 
-function drawRestrictedZones(skipIndices = new Set(), restrictedCoords = null) {
+function drawRestrictedZones(skipIndices = new Set()) {
     if (!state.showRestrictionLines) return;
     const relevantWalls = state.walls.filter((w, idx) =>
         !skipIndices.has(idx) && (
@@ -234,17 +234,6 @@ function drawRestrictedZones(skipIndices = new Set(), restrictedCoords = null) {
             Math.abs(w.floorId - state.currentFloorId) === 1
         )
     );
-
-    // Compute visible world bounds in mm for clamping infinite zone edges
-    const visibleLeft = (-panOffset.x) / zoomLevel;
-    const visibleTop = (-panOffset.y) / zoomLevel;
-    const visibleRight = (canvas.width - panOffset.x) / zoomLevel;
-    const visibleBottom = (canvas.height - panOffset.y) / zoomLevel;
-    const margin = 100000;
-    const infiniteLeft = pxToMm(visibleLeft - margin);
-    const infiniteRight = pxToMm(visibleRight + margin);
-    const infiniteTop = pxToMm(visibleTop - margin);
-    const infiniteBottom = pxToMm(visibleBottom + margin);
 
     const gridStep = GRID_SIZE_EXTERNAL;
 
@@ -272,6 +261,14 @@ function drawRestrictedZones(skipIndices = new Set(), restrictedCoords = null) {
         const zoneNeg = internalFace - ((use1200 && normalDir < 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
         const zonePos = internalFace + ((use1200 && normalDir > 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
 
+        // Wall projection bounds — all red lines are clipped to this range
+        const wallMin = isHorizontal
+            ? Math.min(wall.pointA.x, wall.pointB.x)
+            : Math.min(wall.pointA.y, wall.pointB.y);
+        const wallMax = isHorizontal
+            ? Math.max(wall.pointA.x, wall.pointB.x)
+            : Math.max(wall.pointA.y, wall.pointB.y);
+
         const firstGrid = Math.ceil(zoneNeg / gridStep) * gridStep;
         for (let g = firstGrid; g <= zonePos; g += gridStep) {
             const dist = Math.abs(g - internalFace);
@@ -282,38 +279,14 @@ function drawRestrictedZones(skipIndices = new Set(), restrictedCoords = null) {
             const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
             if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
 
-            // Skip drawing red line if this gridline is already hidden
-            if (restrictedCoords) {
-                const coordSet = isHorizontal ? restrictedCoords.restrictedY : restrictedCoords.restrictedX;
-                if (coordSet.has(g)) continue;
-            }
-
-            // 600mm lines extend infinitely. 1200mm envelope lines are clipped
-            // to the envelope wall's projection for visual clarity.
-            const isEnvelopeLine = use1200 && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
+            // All red lines are clipped to wall projection
             ctx.beginPath();
-            if (isEnvelopeLine) {
-                const wallMin = isHorizontal
-                    ? Math.min(wall.pointA.x, wall.pointB.x)
-                    : Math.min(wall.pointA.y, wall.pointB.y);
-                const wallMax = isHorizontal
-                    ? Math.max(wall.pointA.x, wall.pointB.x)
-                    : Math.max(wall.pointA.y, wall.pointB.y);
-                if (isHorizontal) {
-                    ctx.moveTo(mmToPx(wallMin), mmToPx(g));
-                    ctx.lineTo(mmToPx(wallMax), mmToPx(g));
-                } else {
-                    ctx.moveTo(mmToPx(g), mmToPx(wallMin));
-                    ctx.lineTo(mmToPx(g), mmToPx(wallMax));
-                }
+            if (isHorizontal) {
+                ctx.moveTo(mmToPx(wallMin), mmToPx(g));
+                ctx.lineTo(mmToPx(wallMax), mmToPx(g));
             } else {
-                if (isHorizontal) {
-                    ctx.moveTo(mmToPx(infiniteLeft), mmToPx(g));
-                    ctx.lineTo(mmToPx(infiniteRight), mmToPx(g));
-                } else {
-                    ctx.moveTo(mmToPx(g), mmToPx(infiniteTop));
-                    ctx.lineTo(mmToPx(g), mmToPx(infiniteBottom));
-                }
+                ctx.moveTo(mmToPx(g), mmToPx(wallMin));
+                ctx.lineTo(mmToPx(g), mmToPx(wallMax));
             }
             ctx.stroke();
         }
@@ -645,7 +618,7 @@ function draw() {
 
     // Draw persistent restriction zones (skip walls being thickness-converted,
     // and skip red lines for gridlines that are already hidden)
-    drawRestrictedZones(skipZoneIndices, restrictedCoords);
+    drawRestrictedZones(skipZoneIndices);
 
     // Draw building envelopes (waffle slabs) - BEFORE walls so walls appear on top
     drawBuildingEnvelopes();

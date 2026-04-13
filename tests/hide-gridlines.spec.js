@@ -188,6 +188,30 @@ test.describe('Partial Gridline Hiding', () => {
         expect(result.seg1max).toBe(9000);
     });
 
+    test('unit: drawRestrictedZones completes with showRestrictionLines on', async ({ page }) => {
+        const result = await page.evaluate(() => {
+            const sim = window.__sim;
+            const Wall = sim.Wall;
+            const renderer = window.__renderer2D;
+
+            sim.state.walls = [];
+            sim.state.buildingEnvelopes = [];
+            sim.state.returningWallOverrides.clear();
+            sim.state.showRestrictionLines = true;
+
+            // Place a wall to create restrictions
+            sim.state.walls.push(new Wall(0, 1800, 3000, 1800, 200, 2700, null, 0));
+            sim.updateBuildingEnvelopes();
+
+            // Full draw — this exercises drawRestrictedZones
+            renderer.draw();
+
+            return { drawCompleted: true };
+        });
+
+        expect(result.drawCompleted).toBe(true);
+    });
+
     test('unit: drawGrid completes without error using segment maps', async ({ page }) => {
         const result = await page.evaluate(() => {
             const sim = window.__sim;
