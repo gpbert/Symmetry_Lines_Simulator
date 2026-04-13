@@ -81,10 +81,11 @@ function shrinkToAvoidRestriction(startPt, endPt, lengthGrid) {
     );
     const restriction = sim.isWallInRestrictedZone(fullWall);
 
-    if (!restriction.restricted || !restriction.wall || !fullWall.overlapsInProjection(restriction.wall)) {
+    if (!restriction.restricted) {
         return endPt;
     }
 
+    // Wall is restricted — shrink by grid increments until it's valid
     let currentLength = isHorizontal
         ? Math.abs(endPt.x - startPt.x)
         : Math.abs(endPt.y - startPt.y);
@@ -99,8 +100,7 @@ function shrinkToAvoidRestriction(startPt, endPt, lengthGrid) {
             testEnd.x + shiftX, testEnd.y + shiftY,
             thickness, 2700, null, state.currentFloorId
         );
-        const testRestriction = sim.isWallInRestrictedZone(testWall);
-        if (!testRestriction.restricted || !testWall.overlapsInProjection(testRestriction.wall)) {
+        if (!sim.isWallInRestrictedZone(testWall).restricted) {
             return testEnd;
         }
         currentLength -= lengthGrid;
