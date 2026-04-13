@@ -771,6 +771,44 @@ function onMouseMove(e) {
         const skipEnvelopeZone = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, skipEnvelopeZone);
 
+        // When restriction error feedback is OFF, shrink preview to avoid restricted zones
+        // (snapLengthToGrid only checks endpoints, but the wall body can enter a zone)
+        if (tempPoint && !state.featureToggles?.restrictionErrorFeedback && !isDrawingInternalWall) {
+            const shiftX = drawingWall._shiftX || 0;
+            const shiftY = drawingWall._shiftY || 0;
+            const thickness = parseInt(document.getElementById('wallThickness').value);
+            const isHorizontal = Math.abs(tempPoint.x - drawingWall.x) > Math.abs(tempPoint.y - drawingWall.y);
+            const direction = isHorizontal
+                ? (tempPoint.x > drawingWall.x ? 1 : -1)
+                : (tempPoint.y > drawingWall.y ? 1 : -1);
+            const lengthGrid = previewLengthGrid;
+
+            // Try current length, then shrink by grid increments until valid
+            let currentLength = isHorizontal
+                ? Math.abs(tempPoint.x - drawingWall.x)
+                : Math.abs(tempPoint.y - drawingWall.y);
+
+            while (currentLength >= MIN_WALL_LENGTH) {
+                const testEnd = isHorizontal
+                    ? { x: drawingWall.x + direction * currentLength, y: drawingWall.y }
+                    : { x: drawingWall.x, y: drawingWall.y + direction * currentLength };
+                const testWall = new Wall(
+                    drawingWall.x + shiftX, drawingWall.y + shiftY,
+                    testEnd.x + shiftX, testEnd.y + shiftY,
+                    thickness, 2700, null, state.currentFloorId
+                );
+                const restriction = sim.isWallInRestrictedZone(testWall);
+                if (!restriction.restricted) {
+                    tempPoint = testEnd;
+                    break;
+                }
+                currentLength -= lengthGrid;
+            }
+            if (currentLength < MIN_WALL_LENGTH) {
+                tempPoint = { x: drawingWall.x, y: drawingWall.y };
+            }
+        }
+
         // Check if the wall should shift away from an envelope wall's projection
         // Only active when the "Auto-shift walls near envelope zones" feature toggle is ON
         // Only skip shift when drawing from an actual envelope extension (not envelope body)
