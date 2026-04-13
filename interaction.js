@@ -228,8 +228,8 @@ function onMouseDown(e) {
             const skipEnvelopeZoneOnPlace = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
             finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, skipEnvelopeZoneOnPlace);
 
-            // When restriction error feedback is OFF, shrink to avoid restricted zones
-            if (finalPos && !state.featureToggles?.restrictionErrorFeedback && !isDrawingInternalWall) {
+            // Always shrink to avoid restricted zones at placement time
+            if (finalPos && !isDrawingInternalWall) {
                 finalPos = shrinkToAvoidRestriction(drawingWall, finalPos, placementLengthGrid);
             }
 
@@ -306,14 +306,17 @@ function onMouseDown(e) {
                 }
 
                 const restriction = sim.isWallInRestrictedZone(newWall);
-                if (restriction.restricted && state.featureToggles?.restrictionErrorFeedback) {
-                    let message = 'Cannot place wall here.';
-                    if (restriction.zone.reason) {
-                        message += ` ${restriction.zone.reason}`;
-                    } else if (restriction.zone.distance) {
-                        message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                if (restriction.restricted) {
+                    if (state.featureToggles?.restrictionErrorFeedback) {
+                        let message = 'Cannot place wall here.';
+                        if (restriction.zone.reason) {
+                            message += ` ${restriction.zone.reason}`;
+                        } else if (restriction.zone.distance) {
+                            message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                        }
+                        showToast(message, 'error');
                     }
-                    showToast(message, 'error');
+                    // Always block placement — toggle only controls error UI
                     drawingWall = null;
                     tempPoint = null;
                     clearDrawingToast();
