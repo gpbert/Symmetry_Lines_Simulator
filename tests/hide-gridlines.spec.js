@@ -246,4 +246,47 @@ test.describe('Partial Gridline Hiding', () => {
         expect(result.y2100min).toBe(0);
         expect(result.y2100max).toBe(3000);
     });
+
+    test('e2e: drawing a wall creates partial gridline restrictions', async ({ page }) => {
+        const canvasBox = await page.locator('#mainCanvas').boundingBox();
+        const centerX = canvasBox.x + canvasBox.width / 2;
+        const centerY = canvasBox.y + canvasBox.height / 2;
+
+        // Ensure draw mode is active
+        await page.click('#drawWallBtn');
+        await page.waitForTimeout(100);
+
+        // Draw a horizontal wall by clicking two points
+        await page.mouse.click(centerX - 200, centerY);
+        await page.waitForTimeout(100);
+        await page.mouse.click(centerX + 200, centerY);
+        await page.waitForTimeout(300);
+
+        const result = await page.evaluate(() => {
+            const renderer = window.__renderer2D;
+            const sim = window.__sim;
+
+            const wallCount = sim.state.walls.length;
+            const { restrictedX, restrictedY } = renderer.getRestrictedGridCoords(new Set());
+
+            // Check that we have segment-based restrictions (Maps with arrays)
+            let hasSegmentArrays = false;
+            for (const [coord, segments] of restrictedY) {
+                if (Array.isArray(segments) && segments.length > 0 && 'min' in segments[0]) {
+                    hasSegmentArrays = true;
+                    break;
+                }
+            }
+
+            return {
+                wallCount,
+                hasRestrictedY: restrictedY.size > 0,
+                hasSegmentArrays,
+            };
+        });
+
+        expect(result.wallCount).toBeGreaterThan(0);
+        expect(result.hasRestrictedY).toBe(true);
+        expect(result.hasSegmentArrays).toBe(true);
+    });
 });
