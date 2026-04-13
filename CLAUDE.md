@@ -64,7 +64,7 @@ The application has a **Feature Toggles** system accessible via a modal in the s
 
 Current toggles:
 - `envelopeShift` (`ft_envelopeShift`): Auto-shift walls near envelope zones. OFF by default. When ON, walls drawn parallel near an envelope are shifted sideways to clear the restriction zone. When OFF, the wall preview stops at the last valid position.
-- `dynamicEnvelopeGridlines` (`ft_dynamicEnvelopeGridlines`): Predict envelope layout changes. OFF by default. When ON, gridlines update dynamically while drawing from an envelope wall, anticipating that the extension will suppress the 1200mm zone to 600mm.
+- `dynamicEnvelopeGridlines` (`ft_dynamicEnvelopeGridlines`): Predict envelope layout changes. OFF by default. When ON, drawing an extension from an envelope wall anticipates the 1200mm→600mm zone reduction — gridlines and snap points at 600-1200mm become available. When OFF, the full 1200mm restriction is enforced for both snapping and gridline visibility until the extension is placed.
 
 ## Important Patterns
 

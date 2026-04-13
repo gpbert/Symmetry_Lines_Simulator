@@ -176,7 +176,8 @@ function onMouseDown(e) {
             }
 
             const placementLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
-            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, isDrawingFromEnvelope);
+            const skipEnvelopeZoneOnPlace = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
+            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, skipEnvelopeZoneOnPlace);
 
             // Apply envelope proximity shift if present
             const shiftX = drawingWall._shiftX || 0;
@@ -767,7 +768,8 @@ function onMouseMove(e) {
         }
 
         const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
-        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, isDrawingFromEnvelope);
+        const skipEnvelopeZone = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
+        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, skipEnvelopeZone);
 
         // Check if the wall should shift away from an envelope wall's projection
         // Only active when the "Auto-shift walls near envelope zones" feature toggle is ON
