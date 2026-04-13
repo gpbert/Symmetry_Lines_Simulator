@@ -601,12 +601,6 @@
                     Draw Void
                 </button>
             </div>
-            <div class="property-group" style="margin-top: 16px;">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showRestrictionLines" checked>
-                    Show restriction lines
-                </label>
-            </div>
         </div>
 
         <div class="tools-section">
@@ -1164,11 +1158,6 @@
                     <path d="M9 17V9M9 9L2 5M9 9L16 5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
                 </svg>`;
             }
-        });
-
-        document.getElementById('showRestrictionLines').addEventListener('change', (e) => {
-            state.showRestrictionLines = e.target.checked;
-            activeRenderer.draw();
         });
 
         document.getElementById('wallThickness').addEventListener('change', () => {

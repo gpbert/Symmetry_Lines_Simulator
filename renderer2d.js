@@ -82,14 +82,18 @@ function drawGrid(restrictedX = new Map(), restrictedY = new Map()) {
     // Vertical lines (x = constant, line runs top→bottom)
     for (let x = startX; x <= endX; x += gridStepExternal) {
         const xMm = Math.round(pxToMm(x));
-        const segments = restrictedX.get(xMm);
-        if (!segments) {
+        const restriction = restrictedX.get(xMm);
+        if (restriction === undefined) {
             // No restrictions — draw full line
             ctx.beginPath();
             ctx.moveTo(x, visibleTop);
             ctx.lineTo(x, visibleBottom);
             ctx.stroke();
+        } else if (restriction === null) {
+            // Infinite restriction — skip entire gridline
+            continue;
         } else {
+            const segments = restriction;
             // Draw gaps around restricted segments
             // Segments are {min, max} in mm along Y axis
             const sorted = segments.slice().sort((a, b) => a.min - b.min);
@@ -117,14 +121,18 @@ function drawGrid(restrictedX = new Map(), restrictedY = new Map()) {
     // Horizontal lines (y = constant, line runs left→right)
     for (let y = startY; y <= endY; y += gridStepExternal) {
         const yMm = Math.round(pxToMm(y));
-        const segments = restrictedY.get(yMm);
-        if (!segments) {
+        const restriction = restrictedY.get(yMm);
+        if (restriction === undefined) {
             // No restrictions — draw full line
             ctx.beginPath();
             ctx.moveTo(visibleLeft, y);
             ctx.lineTo(visibleRight, y);
             ctx.stroke();
+        } else if (restriction === null) {
+            // Infinite restriction — skip entire gridline
+            continue;
         } else {
+            const segments = restriction;
             // Draw gaps around restricted segments
             // Segments are {min, max} in mm along X axis
             const sorted = segments.slice().sort((a, b) => a.min - b.min);
@@ -175,8 +183,10 @@ function drawGrid(restrictedX = new Map(), restrictedY = new Map()) {
 }
 
 function getRestrictedGridCoords(skipIndices = new Set()) {
-    const restrictedX = new Map(); // x-coord → [{min, max}] (y-ranges)
-    const restrictedY = new Map(); // y-coord → [{min, max}] (x-ranges)
+    // Values: null = hide entire gridline (infinite restriction),
+    //         Array<{min, max}> = hide only these segments (projection-limited)
+    const restrictedX = new Map();
+    const restrictedY = new Map();
 
     const relevantWalls = state.walls.filter((w, idx) =>
         !skipIndices.has(idx) && (
@@ -218,80 +228,28 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
             if (dist >= minDist - 2) continue;
 
             const map = isHorizontal ? restrictedY : restrictedX;
-            if (!map.has(g)) map.set(g, []);
-            map.get(g).push({ min: wallMin, max: wallMax });
+
+            // Already marked infinite — nothing more to do
+            if (map.get(g) === null) continue;
+
+            // Within 600mm: always infinite (global restriction, no projection check)
+            // Between 600mm and 1200mm on envelope external face: projection-limited
+            const isEnvelopeExclusive = use1200 && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
+
+            if (isEnvelopeExclusive) {
+                // Projection-limited: add segment
+                if (!map.has(g)) map.set(g, []);
+                map.get(g).push({ min: wallMin, max: wallMax });
+            } else {
+                // Global restriction: hide entire gridline
+                map.set(g, null);
+            }
         }
     });
 
     return { restrictedX, restrictedY };
 }
 
-function drawRestrictedZones(skipIndices = new Set()) {
-    if (!state.showRestrictionLines) return;
-    const relevantWalls = state.walls.filter((w, idx) =>
-        !skipIndices.has(idx) && (
-            w.floorId === state.currentFloorId ||
-            Math.abs(w.floorId - state.currentFloorId) === 1
-        )
-    );
-
-    const gridStep = GRID_SIZE_EXTERNAL;
-
-    relevantWalls.forEach(wall => {
-        // Non-structural walls don't generate restriction zones
-        if (sim.isInternalWall(wall)) return;
-
-        const isHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
-        const internalFace = isHorizontal ? wall.pointA.y : wall.pointA.x;
-        const normalDir = isHorizontal ? wall.n.y : wall.n.x;
-        const inEnvelope = sim.isWallInEnvelope(wall);
-        // Suppress 1200mm zone if wall has a placed extension OR if user is
-        // currently drawing a perpendicular wall from this envelope wall
-        const drawingFromThis = inEnvelope && _interactionState.isDrawingFromEnvelope
-            && _interactionState.drawingWall
-            && wall.containsPoint(_interactionState.drawingWall.x, _interactionState.drawingWall.y, 15);
-        const hasExtension = inEnvelope && (sim.envelopeWallHasExtension(wall) || drawingFromThis);
-
-        ctx.strokeStyle = 'rgba(220, 38, 38, 0.5)';
-        ctx.lineWidth = 4 / zoomLevel;
-
-        // Asymmetric zone for envelope walls without extensions: 1200mm on external face side
-        // Envelope walls with extensions or non-envelope walls: 600mm on both sides
-        const use1200 = inEnvelope && !hasExtension;
-        const zoneNeg = internalFace - ((use1200 && normalDir < 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
-        const zonePos = internalFace + ((use1200 && normalDir > 0) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL);
-
-        // Wall projection bounds — all red lines are clipped to this range
-        const wallMin = isHorizontal
-            ? Math.min(wall.pointA.x, wall.pointB.x)
-            : Math.min(wall.pointA.y, wall.pointB.y);
-        const wallMax = isHorizontal
-            ? Math.max(wall.pointA.x, wall.pointB.x)
-            : Math.max(wall.pointA.y, wall.pointB.y);
-
-        const firstGrid = Math.ceil(zoneNeg / gridStep) * gridStep;
-        for (let g = firstGrid; g <= zonePos; g += gridStep) {
-            const dist = Math.abs(g - internalFace);
-            if (dist < 10) continue; // skip the wall's own line
-
-            // Determine min distance for this grid position's side
-            const isOnNormalSide = (g - internalFace) * normalDir > 0;
-            const minDist = (use1200 && isOnNormalSide) ? MIN_DISTANCE_OPPOSITE : MIN_DISTANCE_PARALLEL;
-            if (dist >= minDist - 2) continue; // skip boundary — placement is valid there
-
-            // All red lines are clipped to wall projection
-            ctx.beginPath();
-            if (isHorizontal) {
-                ctx.moveTo(mmToPx(wallMin), mmToPx(g));
-                ctx.lineTo(mmToPx(wallMax), mmToPx(g));
-            } else {
-                ctx.moveTo(mmToPx(g), mmToPx(wallMin));
-                ctx.lineTo(mmToPx(g), mmToPx(wallMax));
-            }
-            ctx.stroke();
-        }
-    });
-}
 
 function drawWall(wall, isSelected = false, violations = [], opacity = 1.0, overrideColor = null, ext = null, isNonStructural = false) {
     const hasViolation = violations.length > 0;
@@ -615,10 +573,6 @@ function draw() {
     const skipZoneIndices = new Set(thicknessOverrides.keys());
     const restrictedCoords = getRestrictedGridCoords(skipZoneIndices);
     drawGrid(restrictedCoords.restrictedX, restrictedCoords.restrictedY);
-
-    // Draw persistent restriction zones (skip walls being thickness-converted,
-    // and skip red lines for gridlines that are already hidden)
-    drawRestrictedZones(skipZoneIndices);
 
     // Draw building envelopes (waffle slabs) - BEFORE walls so walls appear on top
     drawBuildingEnvelopes();

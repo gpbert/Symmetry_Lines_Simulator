@@ -258,7 +258,7 @@ export const state = {
     envelopeAngleViolations: [],
     nextVoidId: 1,
     returningWallOverrides: new Map(),
-    showRestrictionLines: true, // Map<Wall, { originalPointA, originalPointB, originalThickness, wasFlipped }>
+    // showRestrictionLines removed — restriction zones communicated via hidden gridlines
 };
 
 // ============================================================
