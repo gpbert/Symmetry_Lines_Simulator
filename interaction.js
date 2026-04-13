@@ -228,6 +228,24 @@ function onMouseDown(e) {
             const skipEnvelopeZoneOnPlace = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
             finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, skipEnvelopeZoneOnPlace);
 
+            // snapLengthToGrid may over-restrict (perpendicular walls). Recover if possible.
+            if (finalPos && finalPos.x === drawingWall.x && finalPos.y === drawingWall.y && !isDrawingInternalWall) {
+                const rawLength = Math.max(Math.abs(pos.x - drawingWall.x), Math.abs(pos.y - drawingWall.y));
+                const snappedRawLength = Math.floor(rawLength / placementLengthGrid) * placementLengthGrid;
+                if (snappedRawLength >= MIN_WALL_LENGTH) {
+                    const isHoriz = Math.abs(pos.x - drawingWall.x) > Math.abs(pos.y - drawingWall.y);
+                    const dir = isHoriz ? (pos.x > drawingWall.x ? 1 : -1) : (pos.y > drawingWall.y ? 1 : -1);
+                    const rawEnd = isHoriz
+                        ? { x: drawingWall.x + dir * snappedRawLength, y: drawingWall.y }
+                        : { x: drawingWall.x, y: drawingWall.y + dir * snappedRawLength };
+                    const testWall = new Wall(drawingWall.x, drawingWall.y, rawEnd.x, rawEnd.y,
+                        thickness, height, null, state.currentFloorId);
+                    if (!sim.isWallInRestrictedZone(testWall).restricted) {
+                        finalPos = rawEnd;
+                    }
+                }
+            }
+
             // Always shrink to avoid restricted zones at placement time
             if (finalPos && !isDrawingInternalWall) {
                 finalPos = shrinkToAvoidRestriction(drawingWall, finalPos, placementLengthGrid);
@@ -827,6 +845,26 @@ function onMouseMove(e) {
         const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
         const skipEnvelopeZone = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
         tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, skipEnvelopeZone);
+
+        // snapLengthToGrid may over-restrict (it checks endpoint coords but not wall
+        // perpendicularity). If it collapsed to zero, try the raw snapped length and
+        // verify with isWallInRestrictedZone which does check perpendicularity.
+        if (tempPoint && tempPoint.x === drawingWall.x && tempPoint.y === drawingWall.y && !isDrawingInternalWall) {
+            const rawLength = Math.max(Math.abs(constrained.x - drawingWall.x), Math.abs(constrained.y - drawingWall.y));
+            const snappedRawLength = Math.floor(rawLength / previewLengthGrid) * previewLengthGrid;
+            if (snappedRawLength >= MIN_WALL_LENGTH) {
+                const isHoriz = Math.abs(constrained.x - drawingWall.x) > Math.abs(constrained.y - drawingWall.y);
+                const dir = isHoriz ? (constrained.x > drawingWall.x ? 1 : -1) : (constrained.y > drawingWall.y ? 1 : -1);
+                const rawEnd = isHoriz
+                    ? { x: drawingWall.x + dir * snappedRawLength, y: drawingWall.y }
+                    : { x: drawingWall.x, y: drawingWall.y + dir * snappedRawLength };
+                const testWall = new Wall(drawingWall.x, drawingWall.y, rawEnd.x, rawEnd.y,
+                    parseInt(document.getElementById('wallThickness').value), 2700, null, state.currentFloorId);
+                if (!sim.isWallInRestrictedZone(testWall).restricted) {
+                    tempPoint = rawEnd;
+                }
+            }
+        }
 
         // Always shrink preview to avoid restricted zones
         // (snapLengthToGrid only checks endpoints, but the wall body can enter a zone)
