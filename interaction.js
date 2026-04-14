@@ -60,6 +60,108 @@ export const interactionState = {
 };
 
 // ============================================================
+// Helpers
+// ============================================================
+
+// Cap a wall endpoint so its body doesn't enter a parallel wall's restriction zone.
+// Uses direct geometric computation instead of iterative isWallInRestrictedZone calls.
+function capToAvoidRestriction(startPt, endPt, lengthGrid) {
+    const shiftX = startPt._shiftX || 0;
+    const shiftY = startPt._shiftY || 0;
+    const isHorizontal = Math.abs(endPt.x - startPt.x) > Math.abs(endPt.y - startPt.y);
+    const sx = startPt.x + shiftX;
+    const sy = startPt.y + shiftY;
+    const ex = endPt.x + shiftX;
+    const ey = endPt.y + shiftY;
+
+    // The wall being drawn is vertical (moves along Y) or horizontal (moves along X).
+    // We need to find parallel walls whose restriction zones the wall body would enter.
+    // A wall body "enters" a zone when its length-axis projection overlaps the restricting wall's projection.
+    let maxEndCoord = isHorizontal ? ex : ey;
+    const startCoord = isHorizontal ? sx : sy;
+    const perpCoord = isHorizontal ? sy : sx; // the fixed coordinate (perpendicular to drawing axis)
+    const direction = maxEndCoord > startCoord ? 1 : -1;
+
+    for (const wall of state.walls) {
+        if (sim.isInternalWall(wall)) continue;
+        const floorDiff = Math.abs(wall.floorId - state.currentFloorId);
+        if (floorDiff > 1) continue;
+
+        const wallIsHorizontal = Math.abs(wall.d.x) > Math.abs(wall.d.y);
+
+        // Only check parallel walls (both horizontal or both vertical)
+        if (wallIsHorizontal !== isHorizontal) continue;
+
+        // Check distance between the drawing wall and the existing wall (perpendicular axis)
+        const internalFace = wallIsHorizontal ? wall.pointA.y : wall.pointA.x;
+        const dist = Math.abs(perpCoord - internalFace);
+        if (dist < 10) continue; // same grid line
+
+        // Determine required distance
+        let minDist = sim.MIN_DISTANCE_PARALLEL;
+        if (sim.isWallInEnvelope(wall)) {
+            const normalDir = wallIsHorizontal ? wall.n.y : wall.n.x;
+            const isOnNormalSide = (perpCoord - internalFace) * normalDir > 0;
+            if (isOnNormalSide) {
+                minDist = sim.MIN_DISTANCE_OPPOSITE;
+            }
+        }
+
+        if (dist >= minDist) continue; // outside restriction zone
+
+        // The drawing wall is within the restriction zone of this parallel wall.
+        // Cap the endpoint so the wall body doesn't overlap the restricting wall's projection.
+        const wallMin = wallIsHorizontal
+            ? Math.min(wall.pointA.x, wall.pointB.x)
+            : Math.min(wall.pointA.y, wall.pointB.y);
+        const wallMax = wallIsHorizontal
+            ? Math.max(wall.pointA.x, wall.pointB.x)
+            : Math.max(wall.pointA.y, wall.pointB.y);
+
+        // If drawing towards the wall's projection, cap before entering it
+        if (direction > 0) {
+            // Drawing in positive direction — cap at wallMin (start of restricting wall)
+            if (startCoord < wallMin && maxEndCoord >= wallMin) {
+                // Snap to last grid position before wallMin
+                const capped = Math.floor(wallMin / lengthGrid) * lengthGrid;
+                if (capped <= startCoord) continue; // would be zero length
+                if (capped < maxEndCoord) maxEndCoord = capped;
+            }
+            // If start is already past wallMax, no overlap
+            // If start is within wall projection, wall is already overlapping from start
+            if (startCoord >= wallMin && startCoord <= wallMax) {
+                // Start overlaps — cap at start (zero length, or let it through for perpendicular check)
+                // But this should have been caught by nudgeStartPointOutOfZones
+            }
+        } else {
+            // Drawing in negative direction — cap at wallMax
+            if (startCoord > wallMax && maxEndCoord <= wallMax) {
+                const capped = Math.ceil(wallMax / lengthGrid) * lengthGrid;
+                if (capped >= startCoord) continue;
+                if (capped > maxEndCoord) maxEndCoord = capped;
+            }
+            if (startCoord >= wallMin && startCoord <= wallMax) {
+                // Start overlaps
+            }
+        }
+    }
+
+    // Apply the cap
+    if (isHorizontal) {
+        const cappedX = maxEndCoord - shiftX;
+        if ((direction > 0 && cappedX < endPt.x) || (direction < 0 && cappedX > endPt.x)) {
+            return { x: cappedX, y: endPt.y };
+        }
+    } else {
+        const cappedY = maxEndCoord - shiftY;
+        if ((direction > 0 && cappedY < endPt.y) || (direction < 0 && cappedY > endPt.y)) {
+            return { x: endPt.x, y: cappedY };
+        }
+    }
+    return endPt;
+}
+
+// ============================================================
 // Init
 // ============================================================
 export function initInteraction(rendererGetter, opts) {
@@ -176,7 +278,31 @@ function onMouseDown(e) {
             }
 
             const placementLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
-            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, isDrawingFromEnvelope);
+            const skipEnvelopeZoneOnPlace = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
+            finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, skipEnvelopeZoneOnPlace);
+
+            // snapLengthToGrid may over-restrict (perpendicular walls). Recover if possible.
+            if (finalPos && finalPos.x === drawingWall.x && finalPos.y === drawingWall.y && !isDrawingInternalWall) {
+                const rawLength = Math.max(Math.abs(pos.x - drawingWall.x), Math.abs(pos.y - drawingWall.y));
+                const snappedRawLength = Math.floor(rawLength / placementLengthGrid) * placementLengthGrid;
+                if (snappedRawLength >= MIN_WALL_LENGTH) {
+                    const isHoriz = Math.abs(pos.x - drawingWall.x) > Math.abs(pos.y - drawingWall.y);
+                    const dir = isHoriz ? (pos.x > drawingWall.x ? 1 : -1) : (pos.y > drawingWall.y ? 1 : -1);
+                    const rawEnd = isHoriz
+                        ? { x: drawingWall.x + dir * snappedRawLength, y: drawingWall.y }
+                        : { x: drawingWall.x, y: drawingWall.y + dir * snappedRawLength };
+                    const testWall = new Wall(drawingWall.x, drawingWall.y, rawEnd.x, rawEnd.y,
+                        thickness, height, null, state.currentFloorId);
+                    if (!sim.isWallInRestrictedZone(testWall).restricted) {
+                        finalPos = rawEnd;
+                    }
+                }
+            }
+
+            // Always shrink to avoid restricted zones at placement time
+            if (finalPos && !isDrawingInternalWall) {
+                finalPos = capToAvoidRestriction(drawingWall, finalPos, placementLengthGrid);
+            }
 
             // Apply envelope proximity shift if present
             const shiftX = drawingWall._shiftX || 0;
@@ -252,13 +378,16 @@ function onMouseDown(e) {
 
                 const restriction = sim.isWallInRestrictedZone(newWall);
                 if (restriction.restricted) {
-                    let message = 'Cannot place wall here.';
-                    if (restriction.zone.reason) {
-                        message += ` ${restriction.zone.reason}`;
-                    } else if (restriction.zone.distance) {
-                        message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                    if (state.featureToggles?.restrictionErrorFeedback) {
+                        let message = 'Cannot place wall here.';
+                        if (restriction.zone.reason) {
+                            message += ` ${restriction.zone.reason}`;
+                        } else if (restriction.zone.distance) {
+                            message += ` Too close to existing wall. Minimum distance required: ${restriction.zone.distance / 10}cm`;
+                        }
+                        showToast(message, 'error');
                     }
-                    showToast(message, 'error');
+                    // Always block placement — toggle only controls error UI
                     drawingWall = null;
                     tempPoint = null;
                     clearDrawingToast();
@@ -767,12 +896,40 @@ function onMouseMove(e) {
         }
 
         const previewLengthGrid = isDrawingInternalWall ? GRID_SIZE_INTERNAL : sim.WALL_LENGTH_GRID;
-        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, isDrawingFromEnvelope);
+        const skipEnvelopeZone = isDrawingFromEnvelope && state.featureToggles?.dynamicEnvelopeGridlines;
+        tempPoint = sim.snapLengthToGrid(drawingWall, constrained, state.currentFloorId, previewLengthGrid, skipEnvelopeZone);
+
+        // snapLengthToGrid may over-restrict (it checks endpoint coords but not wall
+        // perpendicularity). If it collapsed to zero, try the raw snapped length and
+        // verify with isWallInRestrictedZone which does check perpendicularity.
+        if (tempPoint && tempPoint.x === drawingWall.x && tempPoint.y === drawingWall.y && !isDrawingInternalWall) {
+            const rawLength = Math.max(Math.abs(constrained.x - drawingWall.x), Math.abs(constrained.y - drawingWall.y));
+            const snappedRawLength = Math.floor(rawLength / previewLengthGrid) * previewLengthGrid;
+            if (snappedRawLength >= MIN_WALL_LENGTH) {
+                const isHoriz = Math.abs(constrained.x - drawingWall.x) > Math.abs(constrained.y - drawingWall.y);
+                const dir = isHoriz ? (constrained.x > drawingWall.x ? 1 : -1) : (constrained.y > drawingWall.y ? 1 : -1);
+                const rawEnd = isHoriz
+                    ? { x: drawingWall.x + dir * snappedRawLength, y: drawingWall.y }
+                    : { x: drawingWall.x, y: drawingWall.y + dir * snappedRawLength };
+                const testWall = new Wall(drawingWall.x, drawingWall.y, rawEnd.x, rawEnd.y,
+                    parseInt(document.getElementById('wallThickness').value), 2700, null, state.currentFloorId);
+                if (!sim.isWallInRestrictedZone(testWall).restricted) {
+                    tempPoint = rawEnd;
+                }
+            }
+        }
+
+        // Always shrink preview to avoid restricted zones
+        // (snapLengthToGrid only checks endpoints, but the wall body can enter a zone)
+        if (tempPoint && !isDrawingInternalWall) {
+            tempPoint = capToAvoidRestriction(drawingWall, tempPoint, previewLengthGrid);
+        }
 
         // Check if the wall should shift away from an envelope wall's projection
+        // Only active when the "Auto-shift walls near envelope zones" feature toggle is ON
         // Only skip shift when drawing from an actual envelope extension (not envelope body)
         const isOnExtension = sim.isPointOnEnvelopeExtension(drawingWall.x, drawingWall.y, state.currentFloorId);
-        if (tempPoint && !isDrawingInternalWall && !isOnExtension) {
+        if (state.featureToggles?.envelopeShift && tempPoint && !isDrawingInternalWall && !isOnExtension) {
             const shift = sim.getEnvelopeProximityShift(
                 drawingWall.x, drawingWall.y,
                 tempPoint.x, tempPoint.y,
@@ -785,6 +942,9 @@ function onMouseMove(e) {
                 drawingWall._shiftX = 0;
                 drawingWall._shiftY = 0;
             }
+        } else {
+            drawingWall._shiftX = 0;
+            drawingWall._shiftY = 0;
         }
 
         // Auto-flip logic (only when user hasn't manually flipped via Space):

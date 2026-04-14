@@ -797,8 +797,6 @@ function buildZonePlane(wall, faceOffset, normalDir, zoneDepth, color, opacity, 
 function buildZones() {
     clearGroup(zoneGroup);
 
-    if (!state.showRestrictionLines) return;
-
     // Void-mode zones (purple, VOID_GRID distance)
     if (state.currentMode === 'void') {
         const floorY = getFloorY(state.currentFloorId);
