@@ -282,7 +282,8 @@ function onMouseDown(e) {
             finalPos = sim.snapLengthToGrid(drawingWall, finalPos, state.currentFloorId, placementLengthGrid, skipEnvelopeZoneOnPlace);
 
             // snapLengthToGrid may over-restrict (perpendicular walls). Recover if possible.
-            if (finalPos && finalPos.x === drawingWall.x && finalPos.y === drawingWall.y && !isDrawingInternalWall) {
+            // Skip when drawing from envelope — endpoint restriction is legitimate there.
+            if (finalPos && finalPos.x === drawingWall.x && finalPos.y === drawingWall.y && !isDrawingInternalWall && !isDrawingFromEnvelope) {
                 const rawLength = Math.max(Math.abs(pos.x - drawingWall.x), Math.abs(pos.y - drawingWall.y));
                 const snappedRawLength = Math.floor(rawLength / placementLengthGrid) * placementLengthGrid;
                 if (snappedRawLength >= MIN_WALL_LENGTH) {
@@ -902,7 +903,9 @@ function onMouseMove(e) {
         // snapLengthToGrid may over-restrict (it checks endpoint coords but not wall
         // perpendicularity). If it collapsed to zero, try the raw snapped length and
         // verify with isWallInRestrictedZone which does check perpendicularity.
-        if (tempPoint && tempPoint.x === drawingWall.x && tempPoint.y === drawingWall.y && !isDrawingInternalWall) {
+        // Only when NOT drawing from envelope with the toggle off (that case is a
+        // legitimate endpoint restriction, not a perpendicularity issue).
+        if (tempPoint && tempPoint.x === drawingWall.x && tempPoint.y === drawingWall.y && !isDrawingInternalWall && !isDrawingFromEnvelope) {
             const rawLength = Math.max(Math.abs(constrained.x - drawingWall.x), Math.abs(constrained.y - drawingWall.y));
             const snappedRawLength = Math.floor(rawLength / previewLengthGrid) * previewLengthGrid;
             if (snappedRawLength >= MIN_WALL_LENGTH) {
