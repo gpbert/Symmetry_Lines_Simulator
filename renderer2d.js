@@ -167,16 +167,24 @@ function drawGrid(restrictedX = new Map(), restrictedY = new Map()) {
     const endYInternal = Math.ceil(visibleBottom / gridStepInternal) * gridStepInternal;
 
     for (let x = startXInternal; x <= endXInternal; x += gridStepInternal) {
-        // Skip 100mm lines that coincide with visible 300mm lines
-        // (but draw them if the 300mm line is hidden by a restriction)
-        if (Math.abs(x % gridStepExternal) < 0.5 && !restrictedX.has(Math.round(pxToMm(x)))) continue;
+        const xMm = Math.round(pxToMm(x));
+        // Skip if on a visible 300mm line (avoid thin over thick)
+        if (Math.abs(x % gridStepExternal) < 0.5 && !restrictedX.has(xMm)) continue;
+        // Skip if within a null-restricted (infinite) 300mm zone
+        const lowerThickX = Math.floor(xMm / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL;
+        const upperThickX = lowerThickX + GRID_SIZE_EXTERNAL;
+        if (restrictedX.get(lowerThickX) === null || restrictedX.get(upperThickX) === null) continue;
         ctx.beginPath();
         ctx.moveTo(x, visibleTop);
         ctx.lineTo(x, visibleBottom);
         ctx.stroke();
     }
     for (let y = startYInternal; y <= endYInternal; y += gridStepInternal) {
-        if (Math.abs(y % gridStepExternal) < 0.5 && !restrictedY.has(Math.round(pxToMm(y)))) continue;
+        const yMm = Math.round(pxToMm(y));
+        if (Math.abs(y % gridStepExternal) < 0.5 && !restrictedY.has(yMm)) continue;
+        const lowerThickY = Math.floor(yMm / GRID_SIZE_EXTERNAL) * GRID_SIZE_EXTERNAL;
+        const upperThickY = lowerThickY + GRID_SIZE_EXTERNAL;
+        if (restrictedY.get(lowerThickY) === null || restrictedY.get(upperThickY) === null) continue;
         ctx.beginPath();
         ctx.moveTo(visibleLeft, y);
         ctx.lineTo(visibleRight, y);
@@ -240,7 +248,7 @@ function getRestrictedGridCoords(skipIndices = new Set()) {
             // Already marked infinite — nothing more to do
             if (map.get(g) === null) continue;
 
-            // Within 600mm: always infinite (global restriction, no projection check)
+            // Within 600mm: infinite (hide entire gridline — corners included)
             // Between 600mm and 1200mm on envelope external face: projection-limited
             const isEnvelopeExclusive = use1200 && isOnNormalSide && dist >= MIN_DISTANCE_PARALLEL - 2;
 
